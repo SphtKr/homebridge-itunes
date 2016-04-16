@@ -56,35 +56,8 @@ function ITunesPlatform(log, config, api) {
 
   self.log = log;
   self.config = config || { "platform": "iTunes" };
-
-  // Get the id and name of all the AirPlay devices...
-  var tell = 'tell application "iTunes"\n'
-      + 'set apDevMap to {}\n'
-      + 'repeat with aDevice in (AirPlay devices)\n'
-        //+ 'copy {id:aDevice\'s id, name:aDevice\'s name, mac:aDevice\'s network address} to the end of the apDevMap\n'
-        + 'copy {aDevice\'s id, aDevice\'s name, aDevice\'s network address} to the end of the apDevMap\n'
-      + 'end repeat\n'
-      + 'get apDevMap\n'
-  + 'end tell\n';
-
-  osascript.execute(tell, function(err, rtn) {
-    if (err) {
-      self.log(err);
-    }
-    rtn = applescript.Parsers.parse(rtn);
-    if (Array.isArray(rtn)) {
-      for(var i = 0; i < rtn.length; i++)
-        rtn[i] = {
-          id: rtn[i][0],
-          name: rtn[i][1],
-          mac: (rtn[i][2] == "missing value" ? null : rtn[i][2])
-        };
-      self.rawDevices = rtn;
-      if(self.isFinishedLaunching) self.initializeAccessories();
-    }
-  });
-
   self.accessories = {};
+  self.syncTimer = null;
 
   if (api) {
     self.api = api;
@@ -105,7 +78,7 @@ ITunesPlatform.prototype.configureAccessory = function(accessory) {
   .getService(Service.Switch)
   .getCharacteristic(Characteristic.On)
   .on('get', function(callback){
-    var tell = 'tell application "iTunes" to get selected of (AirPlay device id ' + parseInt(rawDevice.id) + ')';
+    var tell = 'tell application "iTunes" to get selected of (AirPlay device id ' + parseInt(accessory.context.rawDevice.id) + ')';
     osascript.execute(tell, function(err, rtn) {
       if (err) {
         callback(err);
@@ -115,7 +88,7 @@ ITunesPlatform.prototype.configureAccessory = function(accessory) {
     });
   })
   .on('set', function(newVal, callback){
-    var tell = 'tell application "iTunes" to set selected of (AirPlay device id ' + parseInt(rawDevice.id) + ') to ' + (newVal ? 'true' : 'false');
+    var tell = 'tell application "iTunes" to set selected of (AirPlay device id ' + parseInt(accessory.context.rawDevice.id) + ') to ' + (newVal ? 'true' : 'false');
     osascript.execute(tell, function(err, rtn) {
       if (err) {
         callback(err);
@@ -136,7 +109,7 @@ ITunesPlatform.prototype.configureAccessory = function(accessory) {
   .getService(ITunesPlatform.AudioDeviceService)
   .getCharacteristic(ITunesPlatform.AudioVolume)
   .on('get', function(callback){
-    var tell = 'tell application "iTunes" to get sound volume of (AirPlay device id ' + parseInt(rawDevice.id) + ')';
+    var tell = 'tell application "iTunes" to get sound volume of (AirPlay device id ' + parseInt(accessory.context.rawDevice.id) + ')';
     osascript.execute(tell, function(err, rtn) {
       if (err) {
         callback(err);
@@ -146,7 +119,7 @@ ITunesPlatform.prototype.configureAccessory = function(accessory) {
     });
   })
   .on('set', function(newVal, callback){
-    var tell = 'tell application "iTunes" to set sound volume of (AirPlay device id ' + parseInt(rawDevice.id) + ') to ' + parseInt(newVal);
+    var tell = 'tell application "iTunes" to set sound volume of (AirPlay device id ' + parseInt(accessory.context.rawDevice.id) + ') to ' + parseInt(newVal);
     osascript.execute(tell, function(err, rtn) {
       if (err) {
         callback(err);
@@ -165,24 +138,72 @@ ITunesPlatform.prototype.configureAccessory = function(accessory) {
 }
 
 ITunesPlatform.prototype.didFinishLaunching = function() {
-  this.isFinishedLaunching = true;
-  if(this.rawDevices) this.initializeAccessories();
+  this.syncAccessories();
 }
 
-ITunesPlatform.prototype.initializeAccessories = function() {
-  var foundMacs = {};
-  for (var i = 0; i < this.rawDevices.length; i++) {
-    var rawDevice = this.rawDevices[i];
-    if(!rawDevice.mac) rawDevice.mac = '00-host-audio';
-    foundMacs[rawDevice.mac] = true;
-    if (!this.accessories[rawDevice.mac]) {
-      this.addAccessory(rawDevice);
+ITunesPlatform.prototype.syncAccessories = function() {
+  clearTimeout(this.syncTimer);
+  this.syncTimer = setTimeout(this.syncAccessories.bind(this), 60000);
+
+  // Get the id and name of all the AirPlay devices...
+  var tell = 'tell application "iTunes"\n'
+      + 'set apDevMap to {}\n'
+      + 'repeat with aDevice in (AirPlay devices)\n'
+        //+ "copy {id:aDevice's id, name:aDevice's name, mac:aDevice's network address} to the end of the apDevMap\n"
+        + "copy {aDevice's id, aDevice's name, aDevice's network address, aDevice's selected, aDevice's sound volume} to the end of the apDevMap\n"
+      + 'end repeat\n'
+      + 'get apDevMap\n'
+  + 'end tell\n';
+
+  osascript.execute(tell, function(err, rtn) {
+    if (err) {
+      this.log(err);
     }
-  }
-  for(var m in this.accessories){
-    if(this.accessories[m] instanceof Accessory && !foundMacs[m])
-      this.accessories[m].updateReachability(false);
-  }
+    rtn = applescript.Parsers.parse(rtn);
+    if (Array.isArray(rtn)) {
+      for(var i = 0; i < rtn.length; i++)
+        rtn[i] = {
+          id: rtn[i][0],
+          name: rtn[i][1],
+          mac: (rtn[i][2] == "missing value" ? null : rtn[i][2]),
+          selected: rtn[i][3] == "true" ? true : false,
+          volume: parseInt(rtn[i][4])
+        };
+      this.rawDevices = rtn;
+
+      // Update id's and values and add any devices we didn't have before...
+      var foundMacs = {};
+      for (var i = 0; i < this.rawDevices.length; i++) {
+        var rawDevice = this.rawDevices[i];
+        if(!rawDevice.mac) rawDevice.mac = '00-host-audio';
+        foundMacs[rawDevice.mac] = true;
+
+        if (this.accessories[rawDevice.mac]) {
+          var accessory = this.accessories[rawDevice.mac];
+
+          accessory.context.rawDevice = rawDevice;
+
+          var volCx = accessory.getService(ITunesPlatform.AudioDeviceService).getCharacteristic(ITunesPlatform.AudioVolume);
+          if(volCx.value != rawDevice.volume)
+            volCx.setValue(rawDevice.volume);
+
+          var onCx = accessory.getService(Service.Switch).getCharacteristic(Characteristic.On);
+          if(onCx.value != rawDevice.selected)
+            onCx.setValue(rawDevice.selected);
+
+          if(!accessory.reachable) accessory.updateReachability(true);
+        } else {
+          this.addAccessory(rawDevice);
+        }
+      }
+      // Set any devices now missing to unreachable...
+      for(var m in this.accessories){
+        if(this.accessories[m] instanceof Accessory && !foundMacs[m])
+          this.accessories[m].updateReachability(false);
+      }
+
+    }
+  }.bind(this));
 
 }
 
