@@ -1,3 +1,5 @@
+var inherits = require('util').inherits;
+var osascript = require('node-osascript');
 var applescript = require('applescript');
 var Accessory, Service, Characteristic, UUIDGen;
 
@@ -10,7 +12,7 @@ module.exports = function(homebridge) {
   homebridge.registerPlatform("homebridge-itunes", "iTunes", ITunesPlatform, true);
 
   ITunesPlatform.AudioVolume = function() {
-    Characteristic.call(this, 'Audio Volume', '00001001-0000-1000-8000-135D67EC4377');
+    Characteristic.call(this, 'Audio Volume', ITunesPlatform.AudioVolume.UUID);
     this.setProps({
       format: Characteristic.Formats.UINT8,
       unit: Characteristic.Units.PERCENTAGE,
@@ -21,6 +23,8 @@ module.exports = function(homebridge) {
     });
     this.value = this.getDefaultValue();
   };
+  ITunesPlatform.AudioVolume.UUID = '00001001-0000-1000-8000-135D67EC4377';
+  inherits(ITunesPlatform.AudioVolume, Characteristic);
 
   /*
   ITunesPlatform.Muting = function() {
@@ -34,14 +38,17 @@ module.exports = function(homebridge) {
   */
 
   ITunesPlatform.AudioDeviceService = function(displayName, subtype) {
-    Service.call(this, displayName, '00000001-0000-1000-8000-135D67EC4377', subtype);
+    Service.call(this, displayName, ITunesPlatform.AudioDeviceService.UUID, subtype);
 
     // Required Characteristics
     this.addCharacteristic(ITunesPlatform.AudioVolume);
 
     // Optional Characteristics
     this.addOptionalCharacteristic(ITunesPlatform.Muting);
+    this.addOptionalCharacteristic(Characteristic.Name);
   };
+  ITunesPlatform.AudioDeviceService.UUID = '00000001-0000-1000-8000-135D67EC4377';
+  inherits(ITunesPlatform.AudioDeviceService, Service);
 }
 
 function ITunesPlatform(log, config, api) {
@@ -50,21 +57,28 @@ function ITunesPlatform(log, config, api) {
   self.log = log;
   self.config = config || { "platform": "iTunes" };
 
-applescript.execString('tell application "iTunes" to get current AirPlay devices', function(err, rtn){ if(err) log(err); else log(rtn);});
   // Get the id and name of all the AirPlay devices...
   var tell = 'tell application "iTunes"\n'
       + 'set apDevMap to {}\n'
       + 'repeat with aDevice in (AirPlay devices)\n'
-        + 'copy {id:aDevice\'s id, name:aDevice\'s name, mac:aDevice\'s network address} to the end of the apDevMap\n'
+        //+ 'copy {id:aDevice\'s id, name:aDevice\'s name, mac:aDevice\'s network address} to the end of the apDevMap\n'
+        + 'copy {aDevice\'s id, aDevice\'s name, aDevice\'s network address} to the end of the apDevMap\n'
       + 'end repeat\n'
       + 'get apDevMap\n'
   + 'end tell\n';
 
-  applescript.execString(tell, function(err, rtn) {
+  osascript.execute(tell, function(err, rtn) {
     if (err) {
-      log(err);
+      self.log(err);
     }
+    rtn = applescript.Parsers.parse(rtn);
     if (Array.isArray(rtn)) {
+      for(var i = 0; i < rtn.length; i++)
+        rtn[i] = {
+          id: rtn[i][0],
+          name: rtn[i][1],
+          mac: (rtn[i][2] == "missing value" ? null : rtn[i][2])
+        };
       self.rawDevices = rtn;
       if(self.isFinishedLaunching) self.initializeAccessories();
     }
@@ -81,12 +95,73 @@ applescript.execString('tell application "iTunes" to get current AirPlay devices
 
 ITunesPlatform.prototype.configureAccessory = function(accessory) {
   var self = this;
+  var rawDevice = accessory.context.rawDevice;
+
+  this.accessories[rawDevice.mac] = accessory;
 
   accessory.reachable = true
+
   accessory
-    .getService(Service.Switch)
-    .getCharacteristic(Characteristic.On)
-    .setValue(0);
+  .getService(Service.Switch)
+  .getCharacteristic(Characteristic.On)
+  .on('get', function(callback){
+    var tell = 'tell application "iTunes" to get selected of (AirPlay device id ' + parseInt(rawDevice.id) + ')';
+    osascript.execute(tell, function(err, rtn) {
+      if (err) {
+        callback(err);
+      } else {
+        callback(false, rtn == "true" ? true : false);
+      }
+    });
+  })
+  .on('set', function(newVal, callback){
+    var tell = 'tell application "iTunes" to set selected of (AirPlay device id ' + parseInt(rawDevice.id) + ') to ' + (newVal ? 'true' : 'false');
+    osascript.execute(tell, function(err, rtn) {
+      if (err) {
+        callback(err);
+      } else {
+        callback(false);
+      }
+    });
+  })
+  .getValue(function(err, value){
+    if(err)
+      self.log(err);
+    else {
+      accessory.getService(Service.Switch).getCharacteristic(Characteristic.On).value = value;
+    }
+  });
+
+  accessory
+  .getService(ITunesPlatform.AudioDeviceService)
+  .getCharacteristic(ITunesPlatform.AudioVolume)
+  .on('get', function(callback){
+    var tell = 'tell application "iTunes" to get sound volume of (AirPlay device id ' + parseInt(rawDevice.id) + ')';
+    osascript.execute(tell, function(err, rtn) {
+      if (err) {
+        callback(err);
+      } else {
+        callback(false, parseInt(rtn));
+      }
+    });
+  })
+  .on('set', function(newVal, callback){
+    var tell = 'tell application "iTunes" to set sound volume of (AirPlay device id ' + parseInt(rawDevice.id) + ') to ' + parseInt(newVal);
+    osascript.execute(tell, function(err, rtn) {
+      if (err) {
+        callback(err);
+      } else {
+        callback(false);
+      }
+    });
+  })
+  .getValue(function(err, value){
+    if(err)
+      self.log(err);
+    else {
+      accessory.getService(ITunesPlatform.AudioDeviceService).getCharacteristic(ITunesPlatform.AudioVolume).value = value;
+    }
+  });
 }
 
 ITunesPlatform.prototype.didFinishLaunching = function() {
@@ -95,34 +170,28 @@ ITunesPlatform.prototype.didFinishLaunching = function() {
 }
 
 ITunesPlatform.prototype.initializeAccessories = function() {
-
-  for (var i = 0; i < self.rawDevices.length; i++) {
-    var rawDevice = self.rawDevices[i];
+  var foundMacs = {};
+  for (var i = 0; i < this.rawDevices.length; i++) {
+    var rawDevice = this.rawDevices[i];
     if(!rawDevice.mac) rawDevice.mac = '00-host-audio';
-    if (!self.accessories[rawDevice.mac]) {
-      self.addAccessory(rawDevice);
+    foundMacs[rawDevice.mac] = true;
+    if (!this.accessories[rawDevice.mac]) {
+      this.addAccessory(rawDevice);
     }
+  }
+  for(var m in this.accessories){
+    if(this.accessories[m] instanceof Accessory && !foundMacs[m])
+      this.accessories[m].updateReachability(false);
   }
 
 }
-
-/*
-ITunesPlatform.prototype.dashEventWithAccessory = function(accessory) {
-  var targetChar = accessory
-    .getService(Service.StatelessProgrammableSwitch)
-    .getCharacteristic(Characteristic.ProgrammableSwitchEvent);
-
-  targetChar.setValue(1);
-  setTimeout(function(){targetChar.setValue(0);}, 10000);
-}
-*/
 
 ITunesPlatform.prototype.addAccessory = function(rawDevice) {
   var self = this;
   var uuid = UUIDGen.generate(rawDevice.mac);
 
-  var newAccessory = new Accessory(rawDevice.name, uuid, 15);
-  newAccessory.context.mac = rawDevice.mac;
+  var newAccessory = new Accessory(rawDevice.name, uuid, 1); // 1 = Accessory.Category.OTHER
+  newAccessory.context.rawDevice = rawDevice;
 
   newAccessory.addService(Service.Switch, rawDevice.name);
   newAccessory.addService(ITunesPlatform.AudioDeviceService, rawDevice.name);
@@ -133,57 +202,14 @@ ITunesPlatform.prototype.addAccessory = function(rawDevice) {
   .setCharacteristic(Characteristic.Model, "AirPlay Speaker")
   .setCharacteristic(Characteristic.SerialNumber, rawDevice.mac);
 
-  newAccessory
-  .getService(Service.Switch)
-  .getCharacteristic(Characteristic.On)
-  .on('get', function(callback){
-    var tell = 'tell application "iTunes" to set theResult to selected of (AirPlay device id ' + parseInt(rawDevice.id) + ')';
-    applescript.execString(tell, function(err, rtn) {
-      if (err) {
-        callback(err);
-      }
-      callback(false, rtn);
-    });
-  })
-  .on('set', function(newVal, callback){
-    var tell = 'tell application "iTunes" to set selected of (AirPlay device id ' + parseInt(rawDevice.id) + ') to ' + (newVal ? 'true' : 'false');
-    applescript.execString(tell, function(err, rtn) {
-      if (err) {
-        callback(err);
-      }
-      callback(false, rtn);
-    });
-  });
+  this.configureAccessory(newAccessory);
 
-  newAccessory
-  .getService(ITunesPlatform.AudioDeviceService)
-  .getCharacteristic(ITunesPlatform.AudioVolume)
-  .on('get', function(callback){
-    var tell = 'tell application "iTunes" to set theResult to sound volume of (AirPlay device id ' + parseInt(rawDevice.id) + ')';
-    applescript.execString(tell, function(err, rtn) {
-      if (err) {
-        callback(err);
-      }
-      callback(false, rtn);
-    });
-  })
-  .on('set', function(newVal, callback){
-    var tell = 'tell application "iTunes" to set sound volume of (AirPlay device id ' + parseInt(rawDevice.id) + ') to ' + parseInt(newVal);
-    applescript.execString(tell, function(err, rtn) {
-      if (err) {
-        callback(err);
-      }
-      callback(false);
-    });
-  })
-
-  this.accessories[rawDevice.mac] = newAccessory;
   this.api.registerPlatformAccessories("homebridge-itunes", "iTunes", [newAccessory]);
 }
 
 ITunesPlatform.prototype.removeAccessory = function(accessory) {
   if (accessory) {
-    var mac = accessory.context.mac;
+    var mac = accessory.context.rawDevice.mac;
     this.api.unregisterPlatformAccessories("homebridge-itunes", "iTunes", [accessory]);
     delete this.accessories[mac];
   }
