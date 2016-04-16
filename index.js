@@ -2,53 +2,17 @@ var inherits = require('util').inherits;
 var osascript = require('node-osascript');
 var applescript = require('applescript');
 var Accessory, Service, Characteristic, UUIDGen;
+var HomeKitMediaTypes;
+var HKMTGen = require('./HomeKitMediaTypes.js');
 
 module.exports = function(homebridge) {
   Accessory = homebridge.platformAccessory;
   Service = homebridge.hap.Service;
   Characteristic = homebridge.hap.Characteristic;
   UUIDGen = homebridge.hap.uuid;
+  HomeKitMediaTypes = HKMTGen(homebridge);
 
   homebridge.registerPlatform("homebridge-itunes", "iTunes", ITunesPlatform, true);
-
-  ITunesPlatform.AudioVolume = function() {
-    Characteristic.call(this, 'Audio Volume', ITunesPlatform.AudioVolume.UUID);
-    this.setProps({
-      format: Characteristic.Formats.UINT8,
-      unit: Characteristic.Units.PERCENTAGE,
-      maxValue: 100,
-      minValue: 0,
-      minStep: 1,
-      perms: [Characteristic.Perms.READ, Characteristic.Perms.WRITE, Characteristic.Perms.NOTIFY]
-    });
-    this.value = this.getDefaultValue();
-  };
-  ITunesPlatform.AudioVolume.UUID = '00001001-0000-1000-8000-135D67EC4377';
-  inherits(ITunesPlatform.AudioVolume, Characteristic);
-
-  /*
-  ITunesPlatform.Muting = function() {
-    Characteristic.call(this, 'Muting', '00001002-0000-1000-8000-135D67EC4377');
-    this.setProps({
-      format: Characteristic.Formats.UINT8,
-      perms: [Characteristic.Perms.READ, Characteristic.Perms.WRITE, Characteristic.Perms.NOTIFY]
-    });
-    this.value = this.getDefaultValue();
-  };
-  */
-
-  ITunesPlatform.AudioDeviceService = function(displayName, subtype) {
-    Service.call(this, displayName, ITunesPlatform.AudioDeviceService.UUID, subtype);
-
-    // Required Characteristics
-    this.addCharacteristic(ITunesPlatform.AudioVolume);
-
-    // Optional Characteristics
-    this.addOptionalCharacteristic(ITunesPlatform.Muting);
-    this.addOptionalCharacteristic(Characteristic.Name);
-  };
-  ITunesPlatform.AudioDeviceService.UUID = '00000001-0000-1000-8000-135D67EC4377';
-  inherits(ITunesPlatform.AudioDeviceService, Service);
 }
 
 function ITunesPlatform(log, config, api) {
@@ -106,8 +70,8 @@ ITunesPlatform.prototype.configureAccessory = function(accessory) {
   });
 
   accessory
-  .getService(ITunesPlatform.AudioDeviceService)
-  .getCharacteristic(ITunesPlatform.AudioVolume)
+  .getService(HomeKitMediaTypes.AudioDeviceService)
+  .getCharacteristic(HomeKitMediaTypes.AudioVolume)
   .on('get', function(callback){
     var tell = 'tell application "iTunes" to get sound volume of (AirPlay device id ' + parseInt(accessory.context.rawDevice.id) + ')';
     osascript.execute(tell, function(err, rtn) {
@@ -132,7 +96,7 @@ ITunesPlatform.prototype.configureAccessory = function(accessory) {
     if(err)
       self.log(err);
     else {
-      accessory.getService(ITunesPlatform.AudioDeviceService).getCharacteristic(ITunesPlatform.AudioVolume).value = value;
+      accessory.getService(HomeKitMediaTypes.AudioDeviceService).getCharacteristic(HomeKitMediaTypes.AudioVolume).value = value;
     }
   });
 }
@@ -183,7 +147,7 @@ ITunesPlatform.prototype.syncAccessories = function() {
 
           accessory.context.rawDevice = rawDevice;
 
-          var volCx = accessory.getService(ITunesPlatform.AudioDeviceService).getCharacteristic(ITunesPlatform.AudioVolume);
+          var volCx = accessory.getService(HomeKitMediaTypes.AudioDeviceService).getCharacteristic(HomeKitMediaTypes.AudioVolume);
           if(volCx.value != rawDevice.volume)
             volCx.setValue(rawDevice.volume);
 
@@ -215,7 +179,7 @@ ITunesPlatform.prototype.addAccessory = function(rawDevice) {
   newAccessory.context.rawDevice = rawDevice;
 
   newAccessory.addService(Service.Switch, rawDevice.name);
-  newAccessory.addService(ITunesPlatform.AudioDeviceService, rawDevice.name);
+  newAccessory.addService(HomeKitMediaTypes.AudioDeviceService, rawDevice.name);
 
   newAccessory
   .getService(Service.AccessoryInformation)
