@@ -31,12 +31,231 @@ function ITunesPlatform(log, config, api) {
 }
 
 ITunesPlatform.prototype.configureAccessory = function(accessory) {
+  if(accessory.context.iTunesMac){
+    this.configurePrimaryAccessory(accessory);
+  } else {
+    this.configureAirPlayAccessory(accessory);
+  }
+}
+
+ITunesPlatform.prototype.configurePrimaryAccessory = function(accessory) {
   var self = this;
+
+  accessory.reachable = true;
+
+  this.primaryAccessory = accessory;
+
+  accessory
+  .getService(HomeKitMediaTypes.PlaybackDeviceService)
+  .getCharacteristic(HomeKitMediaTypes.PlaybackState)
+  .on('get', function(callback){
+    var tell = 'tell application "iTunes" to get player state';
+    osascript.execute(tell, function(err, rtn) {
+      if(err){
+        callback(err)
+      } else {
+        rtn = applescript.Parsers.parse(rtn);
+        switch (rtn) {
+          case "paused":
+            callback(false, HomeKitMediaTypes.PlaybackState.PAUSED);
+            break;
+          case "stopped":
+            callback(false, HomeKitMediaTypes.PlaybackState.STOPPED);
+            break;
+          default:
+            callback(false, HomeKitMediaTypes.PlaybackState.PLAYING);
+            break;
+        }
+      }
+    }.bind(this));
+  }.bind(this))
+  .on('set', function(newVal, callback){
+    switch (newVal) {
+      case HomeKitMediaTypes.PlaybackState.PLAYING:
+        var tell =
+          'tell application "iTunes"\n'
+          + 'if player state is paused then play\n'
+          + 'if player state is stopped then\n'
+            + 'if exists user playlist "AutoPlay" then\n'
+		          + 'play user playlist "AutoPlay"\n'
+            + 'else\n'
+	            + 'play (some playlist whose special kind is Music)\n'
+            + 'end if\n'
+          + 'end if\n'
+        + 'end tell'
+        osascript.execute(tell, function(err, rtn) {
+          if(err){
+            callback(err)
+          } else {
+            callback();
+          }
+        }.bind(this));
+        break;
+      case HomeKitMediaTypes.PlaybackState.PAUSED:
+        osascript.execute('tell application "iTunes" to pause', function(err, rtn){
+          if(err){
+            callback(err)
+          } else {
+            callback();
+          }
+        }.bind(this));
+        break;
+      case HomeKitMediaTypes.PlaybackState.STOPPED:
+        osascript.execute('tell application "iTunes" to stop', function(err, rtn){
+          if(err){
+            callback(err)
+          } else {
+            callback();
+          }
+        }.bind(this));
+        break;
+      default:
+        callback("Invalid value for PlaybackState!");
+        break;
+    }
+  }.bind(this));
+
+  accessory
+  .getService(HomeKitMediaTypes.PlaybackDeviceService)
+  .getCharacteristic(HomeKitMediaTypes.SkipForward)
+  .on('set', function(newVal, callback){
+    osascript.execute('tell application "iTunes" to next track', function(err, rtn) {
+      if(err){
+        callback(err)
+      } else {
+        callback();
+      }
+    }.bind(this));
+  }.bind(this));
+
+  accessory
+  .getService(HomeKitMediaTypes.PlaybackDeviceService)
+  .getCharacteristic(HomeKitMediaTypes.SkipBackward)
+  .on('set', function(newVal, callback){
+    osascript.execute('tell application "iTunes" to back track', function(err, rtn) {
+      if(err){
+        callback(err)
+      } else {
+        callback();
+      }
+    }.bind(this));
+  }.bind(this));
+
+  accessory
+  .getService(HomeKitMediaTypes.AudioDeviceService)
+  .getCharacteristic(HomeKitMediaTypes.AudioVolume)
+  .on('get', function(callback){
+    var tell = 'tell application "iTunes" to get sound volume';
+    osascript.execute(tell, function(err, rtn) {
+      if (err) {
+        callback(err);
+      } else {
+        callback(false, parseInt(rtn));
+      }
+    });
+  })
+  .on('set', function(newVal, callback){
+    var tell = 'tell application "iTunes" to set sound volume to ' + parseInt(newVal);
+    osascript.execute(tell, function(err, rtn) {
+      if (err) {
+        callback(err);
+      } else {
+        callback(false);
+      }
+    });
+  });
+
+  // Hack switch characteristics to emulate media controls...
+
+  accessory
+  .getService('Playing State')
+  .getCharacteristic(Characteristic.On)
+  .on('get', function(callback){
+    accessory
+    .getService(HomeKitMediaTypes.PlaybackDeviceService)
+    .getCharacteristic(HomeKitMediaTypes.PlaybackState)
+    .getValue(function(err, val){
+      if(err)
+        callback(err);
+      else
+        callback(false, val == HomeKitMediaTypes.PlaybackState.PLAYING);
+    }.bind(this));
+  }.bind(this))
+  .on('set', function(newVal, callback){
+    var pbscx = accessory
+      .getService(HomeKitMediaTypes.PlaybackDeviceService)
+      .getCharacteristic(HomeKitMediaTypes.PlaybackState);
+    if(newVal == true && pbscx.value !== HomeKitMediaTypes.PlaybackState.PLAYING)
+      pbscx.setValue(HomeKitMediaTypes.PlaybackState.PLAYING, callback);
+    if(newVal == false && pbscx.value == HomeKitMediaTypes.PlaybackState.PLAYING)
+      pbscx.setValue(HomeKitMediaTypes.PlaybackState.PAUSED, callback);
+  }.bind(this))
+  .getValue(function(err, value){
+    if(err)
+      self.log(err);
+  });
+
+  accessory
+  .getService('Track Skipper')
+  .getCharacteristic(Characteristic.On)
+  .on('get', function(callback){ callback('false'); })
+  .on('set', function(newVal, callback){
+    if(!newVal){ callback(); return; }
+    accessory
+    .getService(HomeKitMediaTypes.PlaybackDeviceService)
+    .getCharacteristic(HomeKitMediaTypes.SkipForward)
+    .setValue(true, function(err){
+      if(err)
+        callback(err);
+      else
+        callback();
+      setTimeout(function(){
+        accessory
+        .getService('Track Skipper')
+        .getCharacteristic(Characteristic.On)
+        .setValue(false);
+      }, 100);
+    });
+  }.bind(this));
+
+  accessory
+  .getService('Album Skipper')
+  .getCharacteristic(Characteristic.On)
+  .on('get', function(callback){ callback('false'); })
+  .on('set', function(newVal, callback){
+    if(!newVal){ callback(); return; }
+
+    var tell = 'tell application "iTunes"\n'
+      + 'set |current album| to the album of the current track\n'
+  	    + 'repeat while the album of the current track is equal to |current album|\n'
+		    + 'next track\n'
+      + 'end repeat\n'
+    + 'end tell';
+
+    osascript.execute(tell, function(err, rtn) {
+      if(err)
+        callback(err);
+      else
+        callback();
+      setTimeout(function(){
+        accessory
+        .getService('Album Skipper')
+        .getCharacteristic(Characteristic.On)
+        .setValue(false);
+      }, 100);
+    }.bind(this));
+  }.bind(this));
+
+}
+
+ITunesPlatform.prototype.configureAirPlayAccessory = function(accessory) {
+  var self = this;
+
+  accessory.reachable = true;
+
   var rawDevice = accessory.context.rawDevice;
 
   this.accessories[rawDevice.mac] = accessory;
-
-  accessory.reachable = true
 
   accessory
   .getService(Service.Switch)
@@ -47,7 +266,8 @@ ITunesPlatform.prototype.configureAccessory = function(accessory) {
       if (err) {
         callback(err);
       } else {
-        callback(false, rtn == "true" ? true : false);
+        //rtn = applescript.Parsers.parse(rtn);
+        callback(false, !!rtn ? true : false);
       }
     });
   })
@@ -101,6 +321,8 @@ ITunesPlatform.prototype.configureAccessory = function(accessory) {
   });
 }
 
+
+
 ITunesPlatform.prototype.didFinishLaunching = function() {
   this.syncAccessories();
 }
@@ -108,6 +330,32 @@ ITunesPlatform.prototype.didFinishLaunching = function() {
 ITunesPlatform.prototype.syncAccessories = function() {
   clearTimeout(this.syncTimer);
   this.syncTimer = setTimeout(this.syncAccessories.bind(this), 60000);
+
+  // Update the primary accessory
+  var pa = this.primaryAccessory;
+  if(!pa){
+    osascript.execute('get the primary Ethernet address of (get system info)', function(err, rtn){
+      if(err) {
+        // erm...well this is awkward...Try again in a bit?
+        this.log(err);
+        this.log("ERROR: Failed creating iTunes main device, trying again in two seconds.");
+        setTimeout(this.syncAccessories.bind(this), 2000);
+      } else {
+        rtn = applescript.Parsers.parse(rtn);
+        this.addPrimaryAccessory(rtn);
+      }
+    }.bind(this));
+    return; // BRB...
+  }
+  osascript.execute('tell application "iTunes" to get {player state, sound volume}', function(err, rtn){
+    if (err) {
+      this.log(err);
+    }
+    rtn = applescript.Parsers.parse(rtn);
+    if (Array.isArray(rtn)) {
+      //TODO: Sync primary accessory values!
+    }
+  }.bind(this));
 
   // Get the id and name of all the AirPlay devices...
   var tell = 'tell application "iTunes"\n'
@@ -157,7 +405,7 @@ ITunesPlatform.prototype.syncAccessories = function() {
 
           if(!accessory.reachable) accessory.updateReachability(true);
         } else {
-          this.addAccessory(rawDevice);
+          this.addAirPlayAccessory(rawDevice);
         }
       }
       // Set any devices now missing to unreachable...
@@ -171,7 +419,39 @@ ITunesPlatform.prototype.syncAccessories = function() {
 
 }
 
-ITunesPlatform.prototype.addAccessory = function(rawDevice) {
+ITunesPlatform.prototype.addPrimaryAccessory = function(mac){
+  var self = this;
+  var uuid = UUIDGen.generate("iTunes:" + mac);
+  var name = "iTunes";
+
+  var newAccessory = new Accessory(name, uuid, 1); // 1 = Accessory.Category.OTHER
+  newAccessory.context.iTunesMac = mac;
+
+  newAccessory.addService(Service.Switch, "Playing State", "playstate").name = "playstate";
+  newAccessory.addService(HomeKitMediaTypes.AudioDeviceService, name);
+  newAccessory.addService(HomeKitMediaTypes.PlaybackDeviceService, name);
+  newAccessory.addService(Service.Switch, "Track Skipper", "skiptrackforward").name = "skiptrackforward";
+  newAccessory.addService(Service.Switch, "Album Skipper", "skipalbumforward").name = "skipalbumforward";
+
+  newAccessory
+  .getService(Service.AccessoryInformation)
+  .setCharacteristic(Characteristic.Manufacturer, "Apple")
+  .setCharacteristic(Characteristic.Model, "iTunes")
+  .setCharacteristic(Characteristic.SerialNumber, mac);
+
+  newAccessory.getService("playstate").getCharacteristic(Characteristic.On).displayName = "Playing";
+  newAccessory.getService("skiptrackforward").getCharacteristic(Characteristic.On).displayName = "Track Skipper";
+  newAccessory.getService("skipalbumforward").getCharacteristic(Characteristic.On).displayName = "Album Skipper";
+
+  this.configureAccessory(newAccessory);
+
+  this.api.registerPlatformAccessories("homebridge-itunes", "iTunes", [newAccessory]);
+
+  // we came here from an aborted sync, start it again...
+  this.syncAccessories();
+}
+
+ITunesPlatform.prototype.addAirPlayAccessory = function(rawDevice) {
   var self = this;
   var uuid = UUIDGen.generate(rawDevice.mac);
 

@@ -53,7 +53,7 @@ module.exports = function(homebridge) {
     Characteristic.call(this, 'Skip Forward', HomeKitMediaTypes.SkipForward.UUID);
     this.setProps({
       format: Characteristic.Formats.BOOL,
-      perms: [Characteristic.Perms.WRITE, Characteristic.Perms.NOTIFY]
+      perms: [Characteristic.Perms.WRITE]
     });
     this.value = this.getDefaultValue();
   };
@@ -64,7 +64,7 @@ module.exports = function(homebridge) {
     Characteristic.call(this, 'Skip Backward', HomeKitMediaTypes.SkipBackward.UUID);
     this.setProps({
       format: Characteristic.Formats.BOOL,
-      perms: [Characteristic.Perms.WRITE, Characteristic.Perms.NOTIFY]
+      perms: [Characteristic.Perms.WRITE]
     });
     this.value = this.getDefaultValue();
   };
@@ -121,7 +121,7 @@ module.exports = function(homebridge) {
     this.addCharacteristic(HomeKitMediaTypes.AudioVolume);
 
     // Optional Characteristics
-    this.addOptionalCharacteristic(ITunesPlatform.Muting);
+    this.addOptionalCharacteristic(HomeKitMediaTypes.Muting);
     this.addOptionalCharacteristic(Characteristic.Name);
   };
   HomeKitMediaTypes.AudioDeviceService.UUID = '00000001-0000-1000-8000-135D67EC4377';
