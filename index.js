@@ -96,7 +96,7 @@ ITunesPlatform.prototype.configurePrimaryAccessory = function(accessory) {
       case HomeKitMediaTypes.PlaybackState.PLAYING:
         var tell =
           'tell application "iTunes"\n'
-          + 'if player state is paused then play\n'
+          + 'if player state is paused or (exists current track) then play\n'
           + 'if player state is stopped then\n'
             + 'if exists user playlist "AutoPlay" then\n'
 		          + 'play user playlist "AutoPlay"\n'
