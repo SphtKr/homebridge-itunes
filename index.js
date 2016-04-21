@@ -13,6 +13,19 @@ module.exports = function(homebridge) {
   HomeKitMediaTypes = HKMTGen(homebridge);
 
   homebridge.registerPlatform("homebridge-itunes", "iTunes", ITunesPlatform, true);
+
+  Characteristic.prototype.updateValue = function(newValue, context){
+    if (newValue === undefined || newValue === null)
+      newValue = this.getDefaultValue();
+
+    // update our cached value
+    var oldValue = this.value;
+    this.value = newValue;
+
+    // emit a change event if necessary
+    if (oldValue !== newValue)
+      this.emit('change', { oldValue:oldValue, newValue:newValue, context:context });
+  }
 }
 
 function ITunesPlatform(log, config, api) {
@@ -45,9 +58,28 @@ ITunesPlatform.prototype.configurePrimaryAccessory = function(accessory) {
 
   this.primaryAccessory = accessory;
 
-  accessory
+  var cxPlayStateOn = accessory
+  .getService('Playing State')
+  .getCharacteristic(Characteristic.On);
+  var cxPlayState = accessory
   .getService(HomeKitMediaTypes.PlaybackDeviceService)
-  .getCharacteristic(HomeKitMediaTypes.PlaybackState)
+  .getCharacteristic(HomeKitMediaTypes.PlaybackState);
+
+  accessory.getPlaybackStateFromString = function(str){
+    switch (str) {
+      case "paused":
+        return HomeKitMediaTypes.PlaybackState.PAUSED;
+        break;
+      case "stopped":
+        return HomeKitMediaTypes.PlaybackState.STOPPED;
+        break;
+      default:
+        return HomeKitMediaTypes.PlaybackState.PLAYING;
+        break;
+    }
+  }
+
+  cxPlayState
   .on('get', function(callback){
     var tell = 'tell application "iTunes" to get player state';
     osascript.execute(tell, function(err, rtn) {
@@ -55,17 +87,7 @@ ITunesPlatform.prototype.configurePrimaryAccessory = function(accessory) {
         callback(err)
       } else {
         rtn = applescript.Parsers.parse(rtn);
-        switch (rtn) {
-          case "paused":
-            callback(false, HomeKitMediaTypes.PlaybackState.PAUSED);
-            break;
-          case "stopped":
-            callback(false, HomeKitMediaTypes.PlaybackState.STOPPED);
-            break;
-          default:
-            callback(false, HomeKitMediaTypes.PlaybackState.PLAYING);
-            break;
-        }
+        callback(false, accessory.getPlaybackStateFromString(rtn));
       }
     }.bind(this));
   }.bind(this))
@@ -113,7 +135,11 @@ ITunesPlatform.prototype.configurePrimaryAccessory = function(accessory) {
         callback("Invalid value for PlaybackState!");
         break;
     }
-  }.bind(this));
+    cxPlayStateOn.getValue(); // Sync up slave cx with this master cx
+  }.bind(this))
+  .on('change', function(newVal){
+    cxPlayStateOn.getValue(); // Sync up slave cx with this master cx
+  }.bind(this))
 
   accessory
   .getService(HomeKitMediaTypes.PlaybackDeviceService)
@@ -167,13 +193,9 @@ ITunesPlatform.prototype.configurePrimaryAccessory = function(accessory) {
 
   // Hack switch characteristics to emulate media controls...
 
-  accessory
-  .getService('Playing State')
-  .getCharacteristic(Characteristic.On)
+  cxPlayStateOn
   .on('get', function(callback){
-    accessory
-    .getService(HomeKitMediaTypes.PlaybackDeviceService)
-    .getCharacteristic(HomeKitMediaTypes.PlaybackState)
+    cxPlayState
     .getValue(function(err, val){
       if(err)
         callback(err);
@@ -182,13 +204,10 @@ ITunesPlatform.prototype.configurePrimaryAccessory = function(accessory) {
     }.bind(this));
   }.bind(this))
   .on('set', function(newVal, callback){
-    var pbscx = accessory
-      .getService(HomeKitMediaTypes.PlaybackDeviceService)
-      .getCharacteristic(HomeKitMediaTypes.PlaybackState);
-    if(newVal == true && pbscx.value !== HomeKitMediaTypes.PlaybackState.PLAYING)
-      pbscx.setValue(HomeKitMediaTypes.PlaybackState.PLAYING, callback);
-    if(newVal == false && pbscx.value == HomeKitMediaTypes.PlaybackState.PLAYING)
-      pbscx.setValue(HomeKitMediaTypes.PlaybackState.PAUSED, callback);
+    if(newVal == true && cxPlayState.value !== HomeKitMediaTypes.PlaybackState.PLAYING)
+      cxPlayState.setValue(HomeKitMediaTypes.PlaybackState.PLAYING, callback);
+    if(newVal == false && cxPlayState.value == HomeKitMediaTypes.PlaybackState.PLAYING)
+      cxPlayState.setValue(HomeKitMediaTypes.PlaybackState.PAUSED, callback);
   }.bind(this))
   .getValue(function(err, value){
     if(err)
@@ -329,7 +348,7 @@ ITunesPlatform.prototype.didFinishLaunching = function() {
 
 ITunesPlatform.prototype.syncAccessories = function() {
   clearTimeout(this.syncTimer);
-  this.syncTimer = setTimeout(this.syncAccessories.bind(this), 60000);
+  this.syncTimer = setTimeout(this.syncAccessories.bind(this), 2000);
 
   // Update the primary accessory
   var pa = this.primaryAccessory;
@@ -339,23 +358,32 @@ ITunesPlatform.prototype.syncAccessories = function() {
         // erm...well this is awkward...Try again in a bit?
         this.log(err);
         this.log("ERROR: Failed creating iTunes main device, trying again in two seconds.");
-        setTimeout(this.syncAccessories.bind(this), 2000);
+        clearTimeout(this.syncTimer);
+        this.syncTimer = setTimeout(this.syncAccessories.bind(this), 2000);
       } else {
         rtn = applescript.Parsers.parse(rtn);
         this.addPrimaryAccessory(rtn);
       }
     }.bind(this));
     return; // BRB...
+  } else {
+    osascript.execute('tell application "iTunes" to get {player state, sound volume}', function(err, rtn){
+      if (err) {
+        this.log(err);
+      }
+      rtn = applescript.Parsers.parse(rtn);
+      if (Array.isArray(rtn)) {
+        pa
+        .getService(HomeKitMediaTypes.PlaybackDeviceService)
+        .getCharacteristic(HomeKitMediaTypes.PlaybackState)
+        .updateValue(pa.getPlaybackStateFromString(rtn[0]));
+        pa
+        .getService(HomeKitMediaTypes.AudioDeviceService)
+        .getCharacteristic(HomeKitMediaTypes.AudioVolume)
+        .updateValue(parseInt(rtn[1]));
+      }
+    }.bind(this));
   }
-  osascript.execute('tell application "iTunes" to get {player state, sound volume}', function(err, rtn){
-    if (err) {
-      this.log(err);
-    }
-    rtn = applescript.Parsers.parse(rtn);
-    if (Array.isArray(rtn)) {
-      //TODO: Sync primary accessory values!
-    }
-  }.bind(this));
 
   // Get the id and name of all the AirPlay devices...
   var tell = 'tell application "iTunes"\n'
