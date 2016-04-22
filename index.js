@@ -291,15 +291,46 @@ ITunesPlatform.prototype.configureAirPlayAccessory = function(accessory) {
     });
   })
   .on('set', function(newVal, callback){
+    // Now what we gonna do is...
     var tell = 'tell application "iTunes" to set selected of (AirPlay device id ' + parseInt(accessory.context.rawDevice.id) + ') to ' + (newVal ? 'true' : 'false');
-    osascript.execute(tell, function(err, rtn) {
-      if (err) {
-        callback(err);
-      } else {
-        callback(false);
+    // First, we need to handle auto play/pause actions before changing state...
+    var cxPlaybackState = this.primaryAccessory
+    .getService(HomeKitMediaTypes.PlaybackDeviceService)
+    .getCharacteristic(HomeKitMediaTypes.PlaybackState);
+    if(newVal == true) {
+      // Go ahead and turn this one on now...
+      osascript.execute(tell, function(err, rtn) { if (err) callback(err); else callback(false); });
+      // If one AirPlay device turned on and not currently playing...
+      if(cxPlaybackState.value !== HomeKitMediaTypes.PlaybackState.PLAYING){
+        // Turn other AirPlay destinations off...
+        //TODO: Make this behavior configurable!
+        for(var k in this.accessories){
+          var apac = this.accessories[k];
+          if(!apac || apac === accessory || !apac.getService) continue;
+          apac
+          .getService(Service.Switch)
+          .getCharacteristic(Characteristic.On)
+          .setValue(false);
+        }
+        cxPlaybackState.setValue(HomeKitMediaTypes.PlaybackState.PLAYING)
       }
-    });
-  })
+    } else {
+      // If are turning off the last AirPlay device, pause playback...
+      var anyOn = false;
+      for(var k in this.accessories){
+        var apac = this.accessories[k];
+        if(!apac || apac === accessory || !apac.getService) continue;
+        var isOn = apac
+        .getService(Service.Switch)
+        .getCharacteristic(Characteristic.On)
+        .value;
+        if(isOn){ anyOn = true; break; }
+      }
+      if(!anyOn) cxPlaybackState.setValue(HomeKitMediaTypes.PlaybackState.PAUSED);
+      // Now turn this one off...
+      osascript.execute(tell, function(err, rtn) { if (err) callback(err); else callback(false); });
+    }
+  }.bind(this))
   .getValue(function(err, value){
     if(err)
       self.log(err);
@@ -425,11 +456,11 @@ ITunesPlatform.prototype.syncAccessories = function() {
 
           var volCx = accessory.getService(HomeKitMediaTypes.AudioDeviceService).getCharacteristic(HomeKitMediaTypes.AudioVolume);
           if(volCx.value != rawDevice.volume)
-            volCx.setValue(rawDevice.volume);
+            volCx.updateValue(rawDevice.volume);
 
           var onCx = accessory.getService(Service.Switch).getCharacteristic(Characteristic.On);
           if(onCx.value != rawDevice.selected)
-            onCx.setValue(rawDevice.selected);
+            onCx.updateValue(rawDevice.selected);
 
           if(!accessory.reachable) accessory.updateReachability(true);
         } else {
