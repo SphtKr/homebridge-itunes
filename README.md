@@ -1,5 +1,7 @@
 # homebridge-itunes
 
+[![npm version](https://badge.fury.io/js/homebridge-itunes.svg)](https://badge.fury.io/js/homebridge-itunes)
+
 ...is a Homebridge plugin for controlling iTunes and associated AirPlay speakers with HomeKit and Siri.
 
 Mainly, it makes it possible for you control your music system with Siri or via HomeKit scenes. Besides just play and pause, there are some handy features that make this particularly easy to do. It is geared toward audio uses, but will work in most cases to control video as well.
