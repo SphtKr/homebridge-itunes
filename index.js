@@ -378,8 +378,11 @@ ITunesPlatform.prototype.didFinishLaunching = function() {
 }
 
 ITunesPlatform.prototype.syncAccessories = function() {
-  clearTimeout(this.syncTimer);
-  this.syncTimer = setTimeout(this.syncAccessories.bind(this), 2000);
+  var syncAgainIn = function(msec){
+    clearTimeout(this.syncTimer);
+    this.syncTimer = setTimeout(this.syncAccessories.bind(this), msec);
+  }.bind(this);
+  syncAgainIn(2000);
 
   // Update the primary accessory
   var pa = this.primaryAccessory;
@@ -389,10 +392,11 @@ ITunesPlatform.prototype.syncAccessories = function() {
         // erm...well this is awkward...Try again in a bit?
         this.log(err);
         this.log("ERROR: Failed creating iTunes main device, trying again in two seconds.");
-        clearTimeout(this.syncTimer);
-        this.syncTimer = setTimeout(this.syncAccessories.bind(this), 2000);
+        syncAgainIn(2000);
       } else {
-        rtn = applescript.Parsers.parse(rtn);
+        // Messes up MAC addresses that start with a number >:-(
+        // The node-osascript parser is sufficient for this simple string.
+        //rtn = applescript.Parsers.parse(rtn);
         this.addPrimaryAccessory(rtn);
       }
     }.bind(this));
@@ -401,6 +405,9 @@ ITunesPlatform.prototype.syncAccessories = function() {
     osascript.execute('tell application "iTunes" to get {player state, sound volume}', function(err, rtn){
       if (err) {
         this.log(err);
+        this.log("ERROR: Failed syncing iTunes main device, trying again in two seconds.");
+        syncAgainIn(2000);
+        return;
       }
       rtn = applescript.Parsers.parse(rtn);
       if (Array.isArray(rtn)) {
@@ -429,6 +436,9 @@ ITunesPlatform.prototype.syncAccessories = function() {
   osascript.execute(tell, function(err, rtn) {
     if (err) {
       this.log(err);
+      this.log("ERROR: Failed getting AirPlay devices--iTunes may still be launching. Trying again in two seconds.");
+      syncAgainIn(2000);
+      return;
     }
     rtn = applescript.Parsers.parse(rtn);
     if (Array.isArray(rtn)) {

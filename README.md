@@ -10,6 +10,8 @@ Mainly, it makes it possible for you control your music system with Siri or via 
 
 This plugin requires a Mac running iTunes, and presently requires Homebridge to be running on that Mac. Already running Homebridge on a Raspberry Pi? No problem: remember that you can run more than one instance of Homebridge on a network, just install Node on your iTunes Mac and run Homebridge there, being sure to change the `"username"` field in `config.json` to be unique.
 
+Node v4 or greater is required, and Homebridge v0.3 or higher.
+
 ## Quick Start
 
 1. `sudo npm install -g homebridge`, See the [Homebridge](https://github.com/nfarina/homebridge) project site for more information, and to configure Homebridge
