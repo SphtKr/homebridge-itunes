@@ -1,5 +1,5 @@
 var inherits = require('util').inherits;
-var Accessory, Service, Characteristic, UUIDGen;
+var Service, Characteristic;
 
 module.exports = function(homebridge) {
   Service = homebridge.hap.Service;
@@ -112,6 +112,72 @@ module.exports = function(homebridge) {
   HomeKitMediaTypes.PlaybackSpeed.UUID = '00002006-0000-1000-8000-135D67EC4377';
   inherits(HomeKitMediaTypes.PlaybackSpeed, Characteristic);
 
+  HomeKitMediaTypes.MediaCurrentPosition = function() {
+    Characteristic.call(this, 'Media Name', HomeKitMediaTypes.MediaCurrentPosition.UUID);
+    this.setProps({
+      format: Characteristic.Formats.FLOAT, // In seconds
+      perms: [Characteristic.Perms.READ, Characteristic.Perms.NOTIFY]
+    });
+    this.value = this.getDefaultValue();
+  };
+  HomeKitMediaTypes.MediaCurrentPosition.UUID = '00002007-0000-1000-8000-135D67EC4377';
+  inherits(HomeKitMediaTypes.MediaCurrentPosition, Characteristic);
+
+  HomeKitMediaTypes.MediaItemName = function() {
+    Characteristic.call(this, 'Media Name', HomeKitMediaTypes.MediaItemName.UUID);
+    this.setProps({
+      format: Characteristic.Formats.STRING,
+      perms: [Characteristic.Perms.READ, Characteristic.Perms.NOTIFY]
+    });
+    this.value = this.getDefaultValue();
+  };
+  HomeKitMediaTypes.MediaItemName.UUID = '00003001-0000-1000-8000-135D67EC4377';
+  inherits(HomeKitMediaTypes.MediaItemName, Characteristic);
+
+  HomeKitMediaTypes.MediaItemAlbumName = function() {
+    Characteristic.call(this, 'Media Album Name', HomeKitMediaTypes.MediaItemAlbumName.UUID);
+    this.setProps({
+      format: Characteristic.Formats.STRING,
+      perms: [Characteristic.Perms.READ, Characteristic.Perms.NOTIFY]
+    });
+    this.value = this.getDefaultValue();
+  };
+  HomeKitMediaTypes.MediaItemAlbumName.UUID = '00003002-0000-1000-8000-135D67EC4377';
+  inherits(HomeKitMediaTypes.MediaItemAlbumName, Characteristic);
+
+  HomeKitMediaTypes.MediaItemArtist = function() {
+    Characteristic.call(this, 'Media Name', HomeKitMediaTypes.MediaItemArtist.UUID);
+    this.setProps({
+      format: Characteristic.Formats.STRING,
+      perms: [Characteristic.Perms.READ, Characteristic.Perms.NOTIFY]
+    });
+    this.value = this.getDefaultValue();
+  };
+  HomeKitMediaTypes.MediaItemArtist.UUID = '00003003-0000-1000-8000-135D67EC4377';
+  inherits(HomeKitMediaTypes.MediaItemArtist, Characteristic);
+
+  HomeKitMediaTypes.MediaItemArtwork = function() {
+    Characteristic.call(this, 'Media Artwork', HomeKitMediaTypes.MediaItemArtwork.UUID);
+    this.setProps({
+      format: Characteristic.Formats.DATA,
+      perms: [Characteristic.Perms.READ, Characteristic.Perms.NOTIFY]
+    });
+    this.value = this.getDefaultValue();
+  };
+  HomeKitMediaTypes.MediaItemArtwork.UUID = '00003004-0000-1000-8000-135D67EC4377';
+  inherits(HomeKitMediaTypes.MediaItemArtwork, Characteristic);
+
+  HomeKitMediaTypes.MediaItemDuration = function() {
+    Characteristic.call(this, 'Media Name', HomeKitMediaTypes.MediaItemDuration.UUID);
+    this.setProps({
+      format: Characteristic.Formats.FLOAT, // In seconds
+      perms: [Characteristic.Perms.READ, Characteristic.Perms.NOTIFY]
+    });
+    this.value = this.getDefaultValue();
+  };
+  HomeKitMediaTypes.MediaItemDuration.UUID = '00003005-0000-1000-8000-135D67EC4377';
+  inherits(HomeKitMediaTypes.MediaItemDuration, Characteristic);
+
   // Services
 
   HomeKitMediaTypes.AudioDeviceService = function(displayName, subtype) {
@@ -139,10 +205,33 @@ module.exports = function(homebridge) {
     this.addOptionalCharacteristic(HomeKitMediaTypes.ShuffleMode);
     this.addOptionalCharacteristic(HomeKitMediaTypes.RepeatMode);
     this.addOptionalCharacteristic(HomeKitMediaTypes.PlaybackSpeed);
+    this.addOptionalCharacteristic(HomeKitMediaTypes.MediaCurrentPosition);
+    this.addOptionalCharacteristic(HomeKitMediaTypes.MediaItemName);
+    this.addOptionalCharacteristic(HomeKitMediaTypes.MediaItemAlbumName);
+    this.addOptionalCharacteristic(HomeKitMediaTypes.MediaItemArtist);
+    this.addOptionalCharacteristic(HomeKitMediaTypes.MediaItemArtwork);
+    this.addOptionalCharacteristic(HomeKitMediaTypes.MediaItemDuration);
     this.addOptionalCharacteristic(Characteristic.Name);
-  }
+  };
   HomeKitMediaTypes.PlaybackDeviceService.UUID = '00000002-0000-1000-8000-135D67EC4377';
   inherits(HomeKitMediaTypes.PlaybackDeviceService, Service);
+
+  // A media information service that has no playback controls, for e.g. DAB radio...
+  HomeKitMediaTypes.MediaInformationService = function(displayName, subtype) {
+    Service.call(this, displayName, HomeKitMediaTypes.MediaInformationService.UUID, subtype);
+
+    // Required Characteristics
+    this.addCharacteristic(HomeKitMediaTypes.MediaItemName);
+
+    // Optional Characteristics
+    this.addOptionalCharacteristic(HomeKitMediaTypes.MediaItemAlbumName);
+    this.addOptionalCharacteristic(HomeKitMediaTypes.MediaItemArtist);
+    this.addOptionalCharacteristic(HomeKitMediaTypes.MediaItemArtwork);
+    this.addOptionalCharacteristic(HomeKitMediaTypes.MediaItemDuration);
+    this.addOptionalCharacteristic(HomeKitMediaTypes.MediaCurrentPosition);
+  };
+  HomeKitMediaTypes.MediaInformationService.UUID = '00000003-0000-1000-8000-135D67EC4377';
+  inherits(HomeKitMediaTypes.MediaInformationService, Service);
 
   return HomeKitMediaTypes;
 };
