@@ -118,7 +118,7 @@ module.exports = function(homebridge) {
   inherits(HomeKitMediaTypes.PlaybackSpeed, Characteristic);
 
   HomeKitMediaTypes.MediaCurrentPosition = function() {
-    Characteristic.call(this, 'Media Name', HomeKitMediaTypes.MediaCurrentPosition.UUID);
+    Characteristic.call(this, 'Media Current Position', HomeKitMediaTypes.MediaCurrentPosition.UUID);
     this.setProps({
       format: Characteristic.Formats.FLOAT, // In seconds
       perms: [Characteristic.Perms.READ, Characteristic.Perms.NOTIFY]
@@ -151,7 +151,7 @@ module.exports = function(homebridge) {
   inherits(HomeKitMediaTypes.MediaItemAlbumName, Characteristic);
 
   HomeKitMediaTypes.MediaItemArtist = function() {
-    Characteristic.call(this, 'Media Name', HomeKitMediaTypes.MediaItemArtist.UUID);
+    Characteristic.call(this, 'Media Artist', HomeKitMediaTypes.MediaItemArtist.UUID);
     this.setProps({
       format: Characteristic.Formats.STRING,
       perms: [Characteristic.Perms.READ, Characteristic.Perms.NOTIFY]
@@ -173,7 +173,7 @@ module.exports = function(homebridge) {
   inherits(HomeKitMediaTypes.MediaItemArtwork, Characteristic);
 
   HomeKitMediaTypes.MediaItemDuration = function() {
-    Characteristic.call(this, 'Media Name', HomeKitMediaTypes.MediaItemDuration.UUID);
+    Characteristic.call(this, 'Media Duration', HomeKitMediaTypes.MediaItemDuration.UUID);
     this.setProps({
       format: Characteristic.Formats.FLOAT, // In seconds
       perms: [Characteristic.Perms.READ, Characteristic.Perms.NOTIFY]
