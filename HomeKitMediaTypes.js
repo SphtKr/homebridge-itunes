@@ -81,8 +81,13 @@ module.exports = function(homebridge) {
   };
   HomeKitMediaTypes.ShuffleMode.UUID = '00002004-0000-1000-8000-135D67EC4377';
   inherits(HomeKitMediaTypes.ShuffleMode, Characteristic);
+  //NOTE: If GROUP or SET is not supported, accessories should coerce to ALBUM.
+  // If ALBUM is not supported, coerce to ITEM.
+  // In general, it is recommended for apps to only assume OFF, ITEM, and ALBUM
+  // are supported unless it is known that the accessory supports other settings.
   HomeKitMediaTypes.ShuffleMode.OFF = 0;
-  HomeKitMediaTypes.ShuffleMode.INDIVIDUAL = 1;
+  //NOTE: INDIVIDUAL is deprecated.
+  HomeKitMediaTypes.ShuffleMode.ITEM = HomeKitMediaTypes.ShuffleMode.INDIVIDUAL = 1;
   HomeKitMediaTypes.ShuffleMode.GROUP = 2; // e.g. iTunes "Groupings"
   HomeKitMediaTypes.ShuffleMode.ALBUM = 3; // e.g. album or season
   HomeKitMediaTypes.ShuffleMode.SET = 4; // e.g. T.V. Series or album box set
@@ -99,7 +104,7 @@ module.exports = function(homebridge) {
   inherits(HomeKitMediaTypes.RepeatMode, Characteristic);
   HomeKitMediaTypes.RepeatMode.OFF = 0;
   HomeKitMediaTypes.RepeatMode.ONE = 1;
-  HomeKitMediaTypes.RepeatMode.ALL = 255;
+  HomeKitMediaTypes.RepeatMode.ALL = 2;
 
   HomeKitMediaTypes.PlaybackSpeed = function() {
     Characteristic.call(this, 'Playback Speed', HomeKitMediaTypes.PlaybackSpeed.UUID);
