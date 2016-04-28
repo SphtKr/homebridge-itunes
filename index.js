@@ -516,7 +516,7 @@ ITunesPlatform.prototype.syncMediaInformation = function(){
       return;
     }
     var pa = this.primaryAccessory;
-    //rtn = applescript.Parsers.parse(rtn);
+    if (!Array.isArray(rtn)) rtn = applescript.Parsers.parse(rtn); // erm...try the other parser when the default fails?
     if (Array.isArray(rtn) && rtn[0]) {
       pa
       .getService(HomeKitMediaTypes.PlaybackDeviceService)
