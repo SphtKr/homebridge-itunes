@@ -161,17 +161,6 @@ module.exports = function(homebridge) {
   HomeKitMediaTypes.MediaItemArtist.UUID = '00003003-0000-1000-8000-135D67EC4377';
   inherits(HomeKitMediaTypes.MediaItemArtist, Characteristic);
 
-  HomeKitMediaTypes.MediaItemArtwork = function() {
-    Characteristic.call(this, 'Media Artwork', HomeKitMediaTypes.MediaItemArtwork.UUID);
-    this.setProps({
-      format: Characteristic.Formats.DATA,
-      perms: [Characteristic.Perms.READ, Characteristic.Perms.NOTIFY]
-    });
-    this.value = this.getDefaultValue();
-  };
-  HomeKitMediaTypes.MediaItemArtwork.UUID = '00003004-0000-1000-8000-135D67EC4377';
-  inherits(HomeKitMediaTypes.MediaItemArtwork, Characteristic);
-
   HomeKitMediaTypes.MediaItemDuration = function() {
     Characteristic.call(this, 'Media Duration', HomeKitMediaTypes.MediaItemDuration.UUID);
     this.setProps({
@@ -182,6 +171,51 @@ module.exports = function(homebridge) {
   };
   HomeKitMediaTypes.MediaItemDuration.UUID = '00003005-0000-1000-8000-135D67EC4377';
   inherits(HomeKitMediaTypes.MediaItemDuration, Characteristic);
+
+  HomeKitMediaTypes.StillImage = function() {
+    Characteristic.call(this, 'Still Image', HomeKitMediaTypes.StillImage.UUID);
+    this.setProps({
+      format: Characteristic.Formats.DATA,
+      perms: [Characteristic.Perms.READ, Characteristic.Perms.WRITE, Characteristic.Perms.NOTIFY]
+    });
+    this.value = this.getDefaultValue();
+  };
+  HomeKitMediaTypes.StillImage.UUID = '00004001-0000-1000-8000-135D67EC4377';
+  inherits(HomeKitMediaTypes.StillImage, Characteristic);
+
+  // Also known as MIME type...
+  HomeKitMediaTypes.MediaTypeIdentifier = function() {
+    Characteristic.call(this, 'Media Type Identifier', HomeKitMediaTypes.MediaTypeIdentifier.UUID);
+    this.setProps({
+      format: Characteristic.Formats.STRING,
+      perms: [Characteristic.Perms.READ, Characteristic.Perms.WRITE, Characteristic.Perms.NOTIFY]
+    });
+    this.value = null;
+  };
+  HomeKitMediaTypes.MediaTypeIdentifier.UUID = '00004002-0000-1000-8000-135D67EC4377';
+  inherits(HomeKitMediaTypes.MediaTypeIdentifier, Characteristic);
+
+  HomeKitMediaTypes.MediaWidth = function() {
+    Characteristic.call(this, 'Media Width', HomeKitMediaTypes.MediaWidth.UUID);
+    this.setProps({
+      format: Characteristic.Formats.UINT32,
+      perms: [Characteristic.Perms.READ, Characteristic.Perms.WRITE, Characteristic.Perms.NOTIFY]
+    });
+    this.value = this.getDefaultValue();
+  };
+  HomeKitMediaTypes.MediaWidth.UUID = '00004003-0000-1000-8000-135D67EC4377';
+  inherits(HomeKitMediaTypes.MediaWidth, Characteristic);
+
+  HomeKitMediaTypes.MediaHeight = function() {
+    Characteristic.call(this, 'Media Width', HomeKitMediaTypes.MediaHeight.UUID);
+    this.setProps({
+      format: Characteristic.Formats.UINT32,
+      perms: [Characteristic.Perms.READ, Characteristic.Perms.WRITE, Characteristic.Perms.NOTIFY]
+    });
+    this.value = this.getDefaultValue();
+  };
+  HomeKitMediaTypes.MediaHeight.UUID = '00004004-0000-1000-8000-135D67EC4377';
+  inherits(HomeKitMediaTypes.MediaHeight, Characteristic);
 
   // Services
 
@@ -214,9 +248,13 @@ module.exports = function(homebridge) {
     this.addOptionalCharacteristic(HomeKitMediaTypes.MediaItemName);
     this.addOptionalCharacteristic(HomeKitMediaTypes.MediaItemAlbumName);
     this.addOptionalCharacteristic(HomeKitMediaTypes.MediaItemArtist);
-    this.addOptionalCharacteristic(HomeKitMediaTypes.MediaItemArtwork);
     this.addOptionalCharacteristic(HomeKitMediaTypes.MediaItemDuration);
     this.addOptionalCharacteristic(Characteristic.Name);
+    // Artwork characteristics...would be better reported in a separate service?
+    this.addOptionalCharacteristic(HomeKitMediaTypes.StillImage);
+    this.addOptionalCharacteristic(HomeKitMediaTypes.MediaTypeIdentifier);
+    this.addOptionalCharacteristic(HomeKitMediaTypes.MediaWidth);
+    this.addOptionalCharacteristic(HomeKitMediaTypes.MediaHeight);
   };
   HomeKitMediaTypes.PlaybackDeviceService.UUID = '00000002-0000-1000-8000-135D67EC4377';
   inherits(HomeKitMediaTypes.PlaybackDeviceService, Service);
@@ -231,12 +269,32 @@ module.exports = function(homebridge) {
     // Optional Characteristics
     this.addOptionalCharacteristic(HomeKitMediaTypes.MediaItemAlbumName);
     this.addOptionalCharacteristic(HomeKitMediaTypes.MediaItemArtist);
-    this.addOptionalCharacteristic(HomeKitMediaTypes.MediaItemArtwork);
     this.addOptionalCharacteristic(HomeKitMediaTypes.MediaItemDuration);
     this.addOptionalCharacteristic(HomeKitMediaTypes.MediaCurrentPosition);
+    this.addOptionalCharacteristic(Characteristic.Name);
+    // Artwork characteristics...would be better reported in a separate service?
+    this.addOptionalCharacteristic(HomeKitMediaTypes.StillImage);
+    this.addOptionalCharacteristic(HomeKitMediaTypes.MediaTypeIdentifier);
+    this.addOptionalCharacteristic(HomeKitMediaTypes.MediaWidth);
+    this.addOptionalCharacteristic(HomeKitMediaTypes.MediaHeight);
   };
   HomeKitMediaTypes.MediaInformationService.UUID = '00000003-0000-1000-8000-135D67EC4377';
   inherits(HomeKitMediaTypes.MediaInformationService, Service);
+
+  HomeKitMediaTypes.StillImageService = function(displayName, subtype) {
+    Service.call(this, displayName, HomeKitMediaTypes.StillImageService.UUID, subtype);
+
+    // Required Characteristics
+    this.addCharacteristic(HomeKitMediaTypes.StillImage);
+    this.addCharacteristic(HomeKitMediaTypes.MediaTypeIdentifier);
+
+    // Optional Characteristics
+    this.addOptionalCharacteristic(HomeKitMediaTypes.MediaWidth);
+    this.addOptionalCharacteristic(HomeKitMediaTypes.MediaHeight);
+    this.addOptionalCharacteristic(Characteristic.Name);
+  };
+  HomeKitMediaTypes.StillImageService.UUID = '00000004-0000-1000-8000-135D67EC4377';
+  inherits(HomeKitMediaTypes.StillImageService, Service);
 
   return HomeKitMediaTypes;
 };
