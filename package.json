@@ -1,6 +1,6 @@
 {
   "name": "homebridge-itunes",
-  "version": "0.2.0-alpha0",
+  "version": "0.2.0",
   "description": "homebridge-plugin for iTunes control.",
   "main": "index.js",
   "scripts": {
