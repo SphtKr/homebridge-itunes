@@ -35,6 +35,7 @@ function ITunesPlatform(log, config, api) {
   self.config = config || { "platform": "iTunes" };
   self.accessories = {};
   self.syncTimer = null;
+  self.pollInterval = 2000;
 
   if (api) {
     self.api = api;
@@ -377,12 +378,14 @@ ITunesPlatform.prototype.didFinishLaunching = function() {
   this.syncAccessories();
 }
 
+ITunesPlatform.prototype.syncAccessoriesScheduler = function(msec){
+  clearTimeout(this.syncTimer);
+  this.syncTimer = setTimeout(this.syncAccessories.bind(this), msec);
+};
+
 ITunesPlatform.prototype.syncAccessories = function() {
-  var syncAgainIn = function(msec){
-    clearTimeout(this.syncTimer);
-    this.syncTimer = setTimeout(this.syncAccessories.bind(this), msec);
-  }.bind(this);
-  syncAgainIn(2000);
+  var syncAgainIn = this.syncAccessoriesScheduler.bind(this);
+  syncAgainIn(this.pollInterval);
 
   // Update the primary accessory
   var pa = this.primaryAccessory;
@@ -402,7 +405,7 @@ ITunesPlatform.prototype.syncAccessories = function() {
     }.bind(this));
     return; // BRB...
   } else {
-    osascript.execute('tell application "iTunes" to get {player state, sound volume}', function(err, rtn){
+    osascript.execute('tell application "iTunes" to get {player state, sound volume, exists current track}', function(err, rtn){
       if (err) {
         this.log(err);
         this.log("ERROR: Failed syncing iTunes main device, trying again in two seconds.");
@@ -419,6 +422,10 @@ ITunesPlatform.prototype.syncAccessories = function() {
         .getService(HomeKitMediaTypes.AudioDeviceService)
         .getCharacteristic(HomeKitMediaTypes.AudioVolume)
         .updateValue(parseInt(rtn[1]));
+
+        if(rtn[2]){
+          this.syncMediaInformation();
+        }
       }
     }.bind(this));
   }
@@ -486,6 +493,74 @@ ITunesPlatform.prototype.syncAccessories = function() {
     }
   }.bind(this));
 
+}
+
+ITunesPlatform.prototype.syncMediaInformation = function(){
+  var tell = 'tell application "iTunes"\n'
+	+'set theResult to {exists current track}\n'
+	+'if exists current track then\n'
+	+'	set end of theResult to name of current track\n'
+	+'	set end of theResult to album of current track\n'
+	+'	set end of theResult to artist of current track\n'
+	+'	set end of theResult to duration of current track\n'
+	+'	set end of theResult to player position\n'
+	+'end if\n'
+	+'get theResult\n'
+  +'end tell';
+
+  osascript.execute(tell, function(err, rtn){
+    if (err) {
+      this.log(err);
+      this.log("ERROR: Failed syncing media information, trying again in two seconds.");
+      this.syncAccessoriesScheduler(2000);
+      return;
+    }
+    var pa = this.primaryAccessory;
+    if (!Array.isArray(rtn)) rtn = applescript.Parsers.parse(rtn); // erm...try the other parser when the default fails?
+    if (Array.isArray(rtn) && rtn[0]) {
+      pa
+      .getService(HomeKitMediaTypes.PlaybackDeviceService)
+      .getCharacteristic(HomeKitMediaTypes.MediaItemName)
+      .updateValue(rtn[1]);
+      pa
+      .getService(HomeKitMediaTypes.PlaybackDeviceService)
+      .getCharacteristic(HomeKitMediaTypes.MediaItemAlbumName)
+      .updateValue(rtn[2]);
+      pa
+      .getService(HomeKitMediaTypes.PlaybackDeviceService)
+      .getCharacteristic(HomeKitMediaTypes.MediaItemArtist)
+      .updateValue(rtn[3]);
+      pa
+      .getService(HomeKitMediaTypes.PlaybackDeviceService)
+      .getCharacteristic(HomeKitMediaTypes.MediaItemDuration)
+      .updateValue(rtn[4]);
+      pa
+      .getService(HomeKitMediaTypes.PlaybackDeviceService)
+      .getCharacteristic(HomeKitMediaTypes.MediaCurrentPosition)
+      .updateValue(rtn[5]);
+    } else {
+      pa
+      .getService(HomeKitMediaTypes.PlaybackDeviceService)
+      .getCharacteristic(HomeKitMediaTypes.MediaItemName)
+      .updateValue("");
+      pa
+      .getService(HomeKitMediaTypes.PlaybackDeviceService)
+      .getCharacteristic(HomeKitMediaTypes.MediaItemAlbumName)
+      .updateValue("");
+      pa
+      .getService(HomeKitMediaTypes.PlaybackDeviceService)
+      .getCharacteristic(HomeKitMediaTypes.MediaItemArtist)
+      .updateValue("");
+      pa
+      .getService(HomeKitMediaTypes.PlaybackDeviceService)
+      .getCharacteristic(HomeKitMediaTypes.MediaItemDuration)
+      .updateValue(0);
+      pa
+      .getService(HomeKitMediaTypes.PlaybackDeviceService)
+      .getCharacteristic(HomeKitMediaTypes.MediaCurrentPosition)
+      .updateValue(0);
+    }
+  }.bind(this));
 }
 
 ITunesPlatform.prototype.addPrimaryAccessory = function(mac){
