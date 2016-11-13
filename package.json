@@ -1,6 +1,6 @@
 {
   "name": "homebridge-itunes",
-  "version": "0.2.0-alpha0",
+  "version": "0.2.0",
   "description": "homebridge-plugin for iTunes control.",
   "main": "index.js",
   "scripts": {
@@ -25,7 +25,7 @@
 
   "dependencies": {
     "debug": "^2.2.0",
-    "node-osascript": "^1.0.2",
+    "node-osascript": "1.0.2",
     "applescript": "^1.0.0"
   },
   "author": "S'pht'Kr <fthasphtkr@gmail.com> (https://github.com/SphtKr)",
