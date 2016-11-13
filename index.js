@@ -35,6 +35,7 @@ function ITunesPlatform(log, config, api) {
   self.config = config || { "platform": "iTunes" };
   self.accessories = {};
   self.syncTimer = null;
+  self.syncMITimer = null;
   self.pollInterval = 2000;
 
   if (api) {
@@ -167,6 +168,21 @@ ITunesPlatform.prototype.configurePrimaryAccessory = function(accessory) {
       }
     }.bind(this));
   }.bind(this));
+
+  accessory
+  .getService(HomeKitMediaTypes.PlaybackDeviceService)
+  .getCharacteristic(HomeKitMediaTypes.MediaItemArtwork)
+  .on('get', function(callback){
+    osascript.execute('tell application "iTunes" to get the raw data of the first artwork of the current track', function(err, rtn) {
+      if(err){
+        // For now, an error or no artwork both just return null...
+        callback(false, null);
+      } else {
+        var data = applescript.Parsers.parse(rtn).toString('base64');
+        callback(false, data);
+      }
+    });
+  }.bind(this))
 
   accessory
   .getService(HomeKitMediaTypes.AudioDeviceService)
@@ -494,6 +510,11 @@ ITunesPlatform.prototype.syncAccessories = function() {
   }.bind(this));
 
 }
+
+ITunesPlatform.prototype.syncMediaInformationScheduler = function(msec){
+  clearTimeout(this.syncTimer);
+  this.syncMITimer = setTimeout(this.syncAccessories.bind(this), msec);
+};
 
 ITunesPlatform.prototype.syncMediaInformation = function(){
   var tell = 'tell application "iTunes"\n'
