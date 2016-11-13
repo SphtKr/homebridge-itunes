@@ -1,6 +1,5 @@
 var inherits = require('util').inherits;
 var osascript = require('node-osascript');
-var applescript = require('applescript');
 var Accessory, Service, Characteristic, UUIDGen;
 var HomeKitMediaTypes;
 var HKMTGen = require('./HomeKitMediaTypes.js');
@@ -87,7 +86,6 @@ ITunesPlatform.prototype.configurePrimaryAccessory = function(accessory) {
       if(err){
         callback(err)
       } else {
-        rtn = applescript.Parsers.parse(rtn);
         callback(false, accessory.getPlaybackStateFromString(rtn));
       }
     }.bind(this));
@@ -286,7 +284,6 @@ ITunesPlatform.prototype.configureAirPlayAccessory = function(accessory) {
       if (err) {
         callback(err);
       } else {
-        //rtn = applescript.Parsers.parse(rtn);
         callback(false, !!rtn ? true : false);
       }
     });
@@ -397,9 +394,6 @@ ITunesPlatform.prototype.syncAccessories = function() {
         this.log("ERROR: Failed creating iTunes main device, trying again in two seconds.");
         syncAgainIn(2000);
       } else {
-        // Messes up MAC addresses that start with a number >:-(
-        // The node-osascript parser is sufficient for this simple string.
-        //rtn = applescript.Parsers.parse(rtn);
         this.addPrimaryAccessory(rtn);
       }
     }.bind(this));
@@ -412,7 +406,6 @@ ITunesPlatform.prototype.syncAccessories = function() {
         syncAgainIn(2000);
         return;
       }
-      rtn = applescript.Parsers.parse(rtn);
       if (Array.isArray(rtn)) {
         pa
         .getService(HomeKitMediaTypes.PlaybackDeviceService)
@@ -447,7 +440,6 @@ ITunesPlatform.prototype.syncAccessories = function() {
       syncAgainIn(2000);
       return;
     }
-    rtn = applescript.Parsers.parse(rtn);
     if (Array.isArray(rtn)) {
       for(var i = 0; i < rtn.length; i++)
         rtn[i] = {
@@ -516,7 +508,6 @@ ITunesPlatform.prototype.syncMediaInformation = function(){
       return;
     }
     var pa = this.primaryAccessory;
-    if (!Array.isArray(rtn)) rtn = applescript.Parsers.parse(rtn); // erm...try the other parser when the default fails?
     if (Array.isArray(rtn) && rtn[0]) {
       pa
       .getService(HomeKitMediaTypes.PlaybackDeviceService)
