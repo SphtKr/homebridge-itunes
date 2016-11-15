@@ -70,7 +70,7 @@ ITunesPlatform.prototype.configurePrimaryAccessory = function(accessory) {
   .getCharacteristic(HomeKitMediaTypes.PlaybackState);
 
   accessory.getPlaybackStateFromString = function(str){
-    switch (str) {
+    switch (str.trim()) {
       case "paused":
         return HomeKitMediaTypes.PlaybackState.PAUSED;
         break;
@@ -450,7 +450,7 @@ ITunesPlatform.prototype.syncAccessories = function() {
           id: rtn[i][0],
           name: rtn[i][1],
           mac: (rtn[i][2] == "missing value" ? null : rtn[i][2]),
-          selected: rtn[i][3] == "true" ? true : false,
+          selected: rtn[i][3],
           volume: parseInt(rtn[i][4])
         };
       this.rawDevices = rtn;
