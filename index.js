@@ -3,6 +3,7 @@ var fs = require('fs');
 var path = require('path');
 var osascript = require('node-osascript');
 var debug = require('debug')('iTunes');
+var wrap = require('wordwrap');
 var Accessory, Service, Characteristic, UUIDGen;
 var HomeKitMediaTypes;
 var HKMTGen = require('./HomeKitMediaTypes.js');
@@ -579,11 +580,15 @@ ITunesPlatform.prototype.writeMediaInformationFiles = function(){
   var position = papds.getCharacteristic(HomeKitMediaTypes.MediaCurrentPosition).value;
   var pbsize = 50;
   var progressBar = '-'.repeat(Math.floor(pbsize*position/duration)) + '|' + '-'.repeat(Math.ceil(pbsize*(duration-position)/duration)-1);
-  fs.writeFile(
-    "/tmp/homebridge-itunes-nowplaying.txt",
-    name + '\n' + album + '\n' + artist + '\n' + this._hhmmss(position) + ' ' + progressBar + ' ' + this._hhmmss(duration - position),
-    function(err){if(err) debug(err);}
-  );
+
+  try {
+    fs.writeFileSync(
+      "/tmp/homebridge-itunes-nowplaying.txt",
+      wrap(50)(name + '\n\n' + album + '\n\n' + artist) + '\n\n' + this._hhmmss(position) + ' ' + progressBar + ' ' + this._hhmmss(duration - position)
+    );
+  } catch(e){
+    debug(e);
+  }
 
   if(name != ITunesPlatform._lastSeenTrackName){
     osascript.executeFile(path.join(__dirname, 'scripts', 'GetAlbumArtwork.applescript'));
@@ -594,9 +599,9 @@ ITunesPlatform.prototype.writeMediaInformationFiles = function(){
     'ffmpeg',
     ('-y -i /tmp/homebridge-itunes-artwork.jpg '
     + '-vf scale=(iw*sar)*min(480/(iw*sar)\\,480/ih):ih*min(480/(iw*sar)\\,480/ih),'
-    + 'pad=480:480:(480-iw*min(480/iw\\,480/ih))/2:(480-ih*min(480/iw\\,480/ih))/2,'
-    + 'drawbox=y=0:color=black@0.7:width=iw:height=60:t=max,'
-    + 'drawtext=fontfile=/Library/Fonts/Skia.ttf:fontsize=12:fontcolor=white:x=5:y=5:textfile=/tmp/homebridge-itunes-nowplaying.txt:reload=1 '
+    + 'pad=854:480:(480-iw*min(480/iw\\,480/ih))/2:(480-ih*min(480/iw\\,480/ih))/2,'
+    + 'drawbox=y=ih-60:color=black@0.7:width=iw:height=60:t=max,'
+    + 'drawtext=fontfile=/Library/Fonts/Skia.ttf:fontsize=16:fontcolor=white:x=485:y=(h-th)/2:fix_bounds=true:textfile=/tmp/homebridge-itunes-nowplaying.txt:reload=1 '
     + '/tmp/homebridge-itunes-nowplaying.jpg').split(' '),
     {env: process.env}
   );
