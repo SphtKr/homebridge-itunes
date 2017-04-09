@@ -8,6 +8,7 @@ var Accessory, Service, Characteristic, UUIDGen;
 var HomeKitMediaTypes;
 var HKMTGen = require('./HomeKitMediaTypes.js');
 var spawn = require('child_process').spawn;
+var debug = require('debug')('iTunes');
 
 module.exports = function(homebridge) {
   Accessory = homebridge.platformAccessory;
@@ -45,6 +46,42 @@ function ITunesPlatform(log, config, api) {
     self.api = api;
 
     self.api.on('didFinishLaunching', self.didFinishLaunching.bind(this));
+  }
+}
+
+ITunesPlatform.scriptQueue = [];
+ITunesPlatform.scriptQueueIsRunning = false;
+ITunesPlatform.runScriptQueue = function(){
+  ITunesPlatform.scriptQueueIsRunning = true;
+
+  var dequeued = ITunesPlatform.scriptQueue.shift();
+  osascript.execute(dequeued.script, function(err, rtn){
+    while(dequeued.callbacks.length > 0){
+      dequeued.callbacks.shift()(err, rtn);
+    }
+debug("Queue depth " + ITunesPlatform.scriptQueue.length);
+    // All callbacks on the last item done...Do next?
+    if(ITunesPlatform.scriptQueue.length == 0){
+      ITunesPlatform.scriptQueueIsRunning = false;
+      return;
+    } else {
+      ITunesPlatform.runScriptQueue();
+    }
+  });
+}
+ITunesPlatform.queueScript = function(script, callback){
+  var last = ITunesPlatform.scriptQueue[ITunesPlatform.scriptQueue.length - 1];
+  if(last && last.script == script){
+    last.callbacks.push(callback);
+    return;
+  }
+
+  ITunesPlatform.scriptQueue.push({ script: script, callbacks: [callback] });
+
+debug("Queue depth " + ITunesPlatform.scriptQueue.length);
+debug(script)
+  if(!ITunesPlatform.scriptQueueIsRunning){
+    ITunesPlatform.runScriptQueue();
   }
 }
 
@@ -87,7 +124,7 @@ ITunesPlatform.prototype.configurePrimaryAccessory = function(accessory) {
   cxPlayState
   .on('get', function(callback){
     var tell = 'tell application "iTunes" to get player state';
-    osascript.execute(tell, function(err, rtn) {
+    ITunesPlatform.queueScript(tell, function(err, rtn) {
       if(err){
         callback(err)
       } else {
@@ -109,7 +146,7 @@ ITunesPlatform.prototype.configurePrimaryAccessory = function(accessory) {
             + 'end if\n'
           + 'end if\n'
         + 'end tell'
-        osascript.execute(tell, function(err, rtn) {
+        ITunesPlatform.queueScript(tell, function(err, rtn) {
           if(err){
             callback(err)
           } else {
@@ -118,7 +155,7 @@ ITunesPlatform.prototype.configurePrimaryAccessory = function(accessory) {
         }.bind(this));
         break;
       case HomeKitMediaTypes.PlaybackState.PAUSED:
-        osascript.execute('tell application "iTunes" to pause', function(err, rtn){
+        ITunesPlatform.queueScript('tell application "iTunes" to pause', function(err, rtn){
           if(err){
             callback(err)
           } else {
@@ -127,7 +164,7 @@ ITunesPlatform.prototype.configurePrimaryAccessory = function(accessory) {
         }.bind(this));
         break;
       case HomeKitMediaTypes.PlaybackState.STOPPED:
-        osascript.execute('tell application "iTunes" to stop', function(err, rtn){
+        ITunesPlatform.queueScript('tell application "iTunes" to stop', function(err, rtn){
           if(err){
             callback(err)
           } else {
@@ -149,7 +186,7 @@ ITunesPlatform.prototype.configurePrimaryAccessory = function(accessory) {
   .getService(HomeKitMediaTypes.PlaybackDeviceService)
   .getCharacteristic(HomeKitMediaTypes.SkipForward)
   .on('set', function(newVal, callback){
-    osascript.execute('tell application "iTunes" to next track', function(err, rtn) {
+    ITunesPlatform.queueScript('tell application "iTunes" to next track', function(err, rtn) {
       if(err){
         callback(err)
       } else {
@@ -162,7 +199,7 @@ ITunesPlatform.prototype.configurePrimaryAccessory = function(accessory) {
   .getService(HomeKitMediaTypes.PlaybackDeviceService)
   .getCharacteristic(HomeKitMediaTypes.SkipBackward)
   .on('set', function(newVal, callback){
-    osascript.execute('tell application "iTunes" to back track', function(err, rtn) {
+    ITunesPlatform.queueScript('tell application "iTunes" to back track', function(err, rtn) {
       if(err){
         callback(err)
       } else {
@@ -176,7 +213,7 @@ ITunesPlatform.prototype.configurePrimaryAccessory = function(accessory) {
   .getCharacteristic(HomeKitMediaTypes.AudioVolume)
   .on('get', function(callback){
     var tell = 'tell application "iTunes" to get sound volume';
-    osascript.execute(tell, function(err, rtn) {
+    ITunesPlatform.queueScript(tell, function(err, rtn) {
       if (err) {
         callback(err);
       } else {
@@ -186,7 +223,7 @@ ITunesPlatform.prototype.configurePrimaryAccessory = function(accessory) {
   })
   .on('set', function(newVal, callback){
     var tell = 'tell application "iTunes" to set sound volume to ' + parseInt(newVal);
-    osascript.execute(tell, function(err, rtn) {
+    ITunesPlatform.queueScript(tell, function(err, rtn) {
       if (err) {
         callback(err);
       } else {
@@ -255,7 +292,7 @@ ITunesPlatform.prototype.configurePrimaryAccessory = function(accessory) {
       + 'end repeat\n'
     + 'end tell';
 
-    osascript.execute(tell, function(err, rtn) {
+    ITunesPlatform.queueScript(tell, function(err, rtn) {
       if(err)
         callback(err);
       else
@@ -285,7 +322,7 @@ ITunesPlatform.prototype.configureAirPlayAccessory = function(accessory) {
   .getCharacteristic(Characteristic.On)
   .on('get', function(callback){
     var tell = 'tell application "iTunes" to get selected of (AirPlay device id ' + parseInt(accessory.context.rawDevice.id) + ')';
-    osascript.execute(tell, function(err, rtn) {
+    ITunesPlatform.queueScript(tell, function(err, rtn) {
       if (err) {
         callback(err);
       } else {
@@ -302,7 +339,7 @@ ITunesPlatform.prototype.configureAirPlayAccessory = function(accessory) {
     .getCharacteristic(HomeKitMediaTypes.PlaybackState);
     if(newVal == true) {
       // Go ahead and turn this one on now...
-      osascript.execute(tell, function(err, rtn) { if (err) callback(err); else callback(false); });
+      ITunesPlatform.queueScript(tell, function(err, rtn) { if (err) callback(err); else callback(false); });
       // If one AirPlay device turned on and not currently playing...
       if(cxPlaybackState.value !== HomeKitMediaTypes.PlaybackState.PLAYING){
         // Turn other AirPlay destinations off...
@@ -331,7 +368,7 @@ ITunesPlatform.prototype.configureAirPlayAccessory = function(accessory) {
       }
       if(!anyOn) cxPlaybackState.setValue(HomeKitMediaTypes.PlaybackState.PAUSED);
       // Now turn this one off...
-      osascript.execute(tell, function(err, rtn) { if (err) callback(err); else callback(false); });
+      ITunesPlatform.queueScript(tell, function(err, rtn) { if (err) callback(err); else callback(false); });
     }
   }.bind(this))
   .getValue(function(err, value){
@@ -347,7 +384,7 @@ ITunesPlatform.prototype.configureAirPlayAccessory = function(accessory) {
   .getCharacteristic(HomeKitMediaTypes.AudioVolume)
   .on('get', function(callback){
     var tell = 'tell application "iTunes" to get sound volume of (AirPlay device id ' + parseInt(accessory.context.rawDevice.id) + ')';
-    osascript.execute(tell, function(err, rtn) {
+    ITunesPlatform.queueScript(tell, function(err, rtn) {
       if (err) {
         callback(err);
       } else {
@@ -357,7 +394,7 @@ ITunesPlatform.prototype.configureAirPlayAccessory = function(accessory) {
   })
   .on('set', function(newVal, callback){
     var tell = 'tell application "iTunes" to set sound volume of (AirPlay device id ' + parseInt(accessory.context.rawDevice.id) + ') to ' + parseInt(newVal);
-    osascript.execute(tell, function(err, rtn) {
+    ITunesPlatform.queueScript(tell, function(err, rtn) {
       if (err) {
         callback(err);
       } else {
@@ -392,7 +429,7 @@ ITunesPlatform.prototype.syncAccessories = function() {
   // Update the primary accessory
   var pa = this.primaryAccessory;
   if(!pa){
-    osascript.execute('get the primary Ethernet address of (get system info)', function(err, rtn){
+    ITunesPlatform.queueScript('get the primary Ethernet address of (get system info)', function(err, rtn){
       if(err) {
         // erm...well this is awkward...Try again in a bit?
         this.log(err);
@@ -404,7 +441,7 @@ ITunesPlatform.prototype.syncAccessories = function() {
     }.bind(this));
     return; // BRB...
   } else {
-    osascript.execute('tell application "iTunes" to get {player state, sound volume, exists current track}', function(err, rtn){
+    ITunesPlatform.queueScript('tell application "iTunes" to get {player state, sound volume, exists current track}', function(err, rtn){
       if (err) {
         this.log(err);
         this.log("ERROR: Failed syncing iTunes main device, trying again in two seconds.");
@@ -438,7 +475,7 @@ ITunesPlatform.prototype.syncAccessories = function() {
       + 'get apDevMap\n'
   + 'end tell\n';
 
-  osascript.execute(tell, function(err, rtn) {
+  ITunesPlatform.queueScript(tell, function(err, rtn) {
     if (err) {
       this.log(err);
       this.log("ERROR: Failed getting AirPlay devices--iTunes may still be launching. Trying again in two seconds.");
@@ -505,7 +542,7 @@ ITunesPlatform.prototype.syncMediaInformation = function(){
 	+'get theResult\n'
   +'end tell';
 
-  osascript.execute(tell, function(err, rtn){
+  ITunesPlatform.queueScript(tell, function(err, rtn){
     if (err) {
       this.log(err);
       this.log("ERROR: Failed syncing media information, trying again in two seconds.");
