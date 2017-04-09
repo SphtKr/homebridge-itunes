@@ -1,6 +1,11 @@
+# IMPORTANT UPGRADE NOTICE
+
+If you are unable to start Homebridge after installing 0.2.0, remove the file `~/.homebridge/accessories/cachedAccessories` and start Homebridge again. Sorry for the difficulty, this will be improved in a future version!
+
 # homebridge-itunes
 
 [![npm version](https://badge.fury.io/js/homebridge-itunes.svg)](https://badge.fury.io/js/homebridge-itunes)
+
 
 ...is a Homebridge plugin for controlling iTunes and associated AirPlay speakers with HomeKit and Siri.
 
