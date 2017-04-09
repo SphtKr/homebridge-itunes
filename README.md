@@ -47,6 +47,42 @@ HomeKit has no built-in controls for media playback, and therefore neither does 
 
 So, there are two "On/Off" switches called "Track Skipper" and "Album Skipper". This lets you tell Siri, "Turn on the Track Skipper" to skip a track and "Turn on the Album Skipper" to skip to the next album. Not quite as natural as saying "Skip this album", but it'll have to do for now.
 
-## Use service groups
+## Use "speakers" in name for Siri control
 
-A good way to configure your home is to put all the AirPlay devices into a service group, for example "Speakers" or "Music", and place each speaker in its appropriate room. Then the names of your AirPlay devices matter very little, and you can just say "Turn on the speakers in the Living Room" and Siri will know what you're talking about.
+To switch on/off airplay destinations with Siri, you may want to rename the AirPlay devices that this plugin creates, and add "Speaker" or "Speakers" to the name. If you name them "Music", for instance, Siri will think you're talking about your device's built-in music player.
+
+(Note that the previous guidance about using service groups was either incorrect or has become a bad idea!)
+
+## "Now Playing" video feed
+
+A new feature is the ability to have a "Now Playing" video feed that looks like a camera in HomeKit. To do this, you will need the  [homebridge-camera-ffmpeg](https://github.com/khaost/homebridge-camera-ffmpeg) plugin, and add a camera definition to it that looks like the following:
+
+```
+{
+    "platform": "Camera-ffmpeg",
+    "cameras": [
+        {
+            "name": "Now Playing",
+            "videoConfig": {
+                "source": "-re -loop 1 -framerate 1 -r 1 -i /tmp/homebridge-itunes-nowplaying.jpg",
+                "maxStreams": 2,
+                "maxWidth": 480,
+                "maxHeight": 480,
+                "maxFPS": 2
+            }
+        }
+    ]
+}
+```
+
+Then, add the camera device to HomeKit (all camera devices have to be added individually, they can't be attached to a bridge device). This is an experimental feature so please provide feedback!
+
+## Known issues
+
+### Unable to remove/uninstall fully
+
+The latest Homebridge API requires the plugin to implement removal of individual devices on a bridge platform, and this has not been implemented yet... This should be coming soon, as it is causing folks problems.
+
+### CPU Usage High
+
+There may be high CPU usage in some applications. As near as I can tell so far, this is a result of launching the `osascript` executable each time the plugin polls iTunes for its status. Since this is the only way I have to access iTunes and the `osascript` integration is provided in an upstream module, there is a limit to what I can do. I plan to introduce a configuration setting that will let you increase the polling interval (current default 2 seconds) if this is a problem for you. Suggestions welcome!
