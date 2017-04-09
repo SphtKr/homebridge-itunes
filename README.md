@@ -80,6 +80,8 @@ A new feature is the ability to have a "Now Playing" video feed that looks like 
 }
 ```
 
+(Note that for this to work, you will need ffmpeg installed with libfreetype support--if you are using Homebrew, you can get this by running `brew install ffmpeg --with-freetype`)
+
 Then, add the camera device to HomeKit (all camera devices have to be added individually, they can't be attached to a bridge device). This is an experimental feature so please provide feedback!
 
 ## Known issues
