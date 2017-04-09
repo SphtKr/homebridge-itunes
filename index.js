@@ -1,8 +1,13 @@
 var inherits = require('util').inherits;
+var fs = require('fs');
+var path = require('path');
 var osascript = require('node-osascript');
+var debug = require('debug')('iTunes');
+var wrap = require('wordwrap');
 var Accessory, Service, Characteristic, UUIDGen;
 var HomeKitMediaTypes;
 var HKMTGen = require('./HomeKitMediaTypes.js');
+var spawn = require('child_process').spawn;
 var debug = require('debug')('iTunes');
 
 module.exports = function(homebridge) {
@@ -588,7 +593,60 @@ ITunesPlatform.prototype.syncMediaInformation = function(){
       .getCharacteristic(HomeKitMediaTypes.MediaCurrentPosition)
       .updateValue(0);
     }
+    this.writeMediaInformationFiles();
   }.bind(this));
+}
+
+ITunesPlatform.prototype._hhmmss = function(seconds) {
+  seconds = Math.round(seconds);
+  var minutes = Math.floor(seconds / 60);
+  seconds = seconds%60;
+  var hours = Math.floor(minutes/60)
+  minutes = minutes%60;
+  return (hours > 0 ? hours+":" : '')
+  + (hours > 0 ? '0'.repeat(2 - (''+minutes).length) : '') + minutes + ":"
+  + '0'.repeat(2 - (''+seconds).length) + seconds;
+}
+
+ITunesPlatform.prototype.writeMediaInformationFiles = function(){
+  var papds = this.primaryAccessory.getService(HomeKitMediaTypes.PlaybackDeviceService);
+  var name = papds.getCharacteristic(HomeKitMediaTypes.MediaItemName).value;
+  var album = papds.getCharacteristic(HomeKitMediaTypes.MediaItemAlbumName).value;
+  var artist = papds.getCharacteristic(HomeKitMediaTypes.MediaItemArtist).value;
+  var duration = papds.getCharacteristic(HomeKitMediaTypes.MediaItemDuration).value;
+  var position = papds.getCharacteristic(HomeKitMediaTypes.MediaCurrentPosition).value;
+  var pbsize = 50;
+  var progressBar = '-'.repeat(Math.floor(pbsize*position/duration)) + '|' + '-'.repeat(Math.ceil(pbsize*(duration-position)/duration)-1);
+
+  try {
+    fs.writeFileSync(
+      "/tmp/homebridge-itunes-nowplaying.txt",
+      wrap(50)(name + '\n\n' + album + '\n\n' + artist) + '\n\n' + this._hhmmss(position) + ' ' + progressBar + ' ' + this._hhmmss(duration - position)
+    );
+  } catch(e){
+    debug(e);
+  }
+
+  if(name != ITunesPlatform._lastSeenTrackName){
+    osascript.executeFile(path.join(__dirname, 'scripts', 'GetAlbumArtwork.applescript'));
+  }
+  ITunesPlatform._lastSeenTrackName = name;
+
+  var child = spawn(
+    'ffmpeg',
+    ('-y -i /tmp/homebridge-itunes-artwork.jpg '
+    + '-vf scale=(iw*sar)*min(480/(iw*sar)\\,480/ih):ih*min(480/(iw*sar)\\,480/ih),'
+    + 'pad=854:480:(480-iw*min(480/iw\\,480/ih))/2:(480-ih*min(480/iw\\,480/ih))/2,'
+    + 'drawbox=y=ih-60:color=black@0.7:width=iw:height=60:t=max,'
+    + 'drawtext=fontfile=/Library/Fonts/Skia.ttf:fontsize=16:fontcolor=white:x=485:y=(h-th)/2:fix_bounds=true:textfile=/tmp/homebridge-itunes-nowplaying.txt:reload=1 '
+    + '/tmp/homebridge-itunes-nowplaying.jpg').split(' '),
+    {env: process.env}
+  );
+  //child.stdout.on('data', function(data){ debug("stdout: " + data); });
+  //child.stderr.on('data', function(data){ debug("stderr: " + data); });
+  child.on('error', function(err) {
+    debug('WARN: Error on ffmpeg image compositing...meh, okay, so we won\'t do that.');
+  });
 }
 
 ITunesPlatform.prototype.addPrimaryAccessory = function(mac){
