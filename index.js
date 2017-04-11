@@ -748,7 +748,7 @@ ITunesPlatform.prototype.configurationRequestHandler = function(context, request
         context.step = "playlistMenu";
         break;
       case 1:
-        context.step = "pollingMenu";
+        context.step = "pollIntervalMenu";
         break;
       case 2:
         context.step = "nowPlayingMenu";
@@ -758,7 +758,16 @@ ITunesPlatform.prototype.configurationRequestHandler = function(context, request
     var selection = request.response.selections[0];
     var playlist = context.options[selection];
     context.newConfig.autoplay_playlist = playlist;
-
+    context.navOptions = [{label: "Back to Preferences", step: "preferencesMenu"}];
+    context.step = "actionSuccess";
+  } else if(context.step == "pollIntervalMenuResponse"){
+    var selection = request.response.selections[0];
+    context.newConfig.poll_interval = [1, 2, 5, 10, 30][selection];
+    context.navOptions = [{label: "Back to Preferences", step: "preferencesMenu"}];
+    context.step = "actionSuccess";
+  } else if(context.step == "nowPlayingMenuResponse"){
+    var selection = request.response.selections[0];
+    context.newConfig.enable_now_playing = [true, false][selection];
     context.navOptions = [{label: "Back to Preferences", step: "preferencesMenu"}];
     context.step = "actionSuccess";
   } else if(context.step == "actionSuccessResponse"){
@@ -841,6 +850,37 @@ ITunesPlatform.prototype.configurationRequestHandler = function(context, request
         }
         callback(respDict);
       }.bind(this));
+      break;
+    case "pollIntervalMenu":
+      var respDict = {
+        "type": "Interface",
+        "interface": "list",
+        "title": "Poll Interval",
+        "detail": "Choose a shorter time for faster updates or a longer time for reduced processor usage. Recommended value is 2 seconds.",
+        "items": [
+          "1 second",
+          "2 seconds",
+          "5 seconds",
+          "10 seconds",
+          "30 seconds"
+        ]
+      }
+      context.step = "pollIntervalMenuResponse";
+      callback(respDict);
+      break;
+    case "nowPlayingMenu":
+      var respDict = {
+        "type": "Interface",
+        "interface": "list",
+        "title": "Now Playing",
+        "detail": "Enable or disable creation of \"Now Playing\" images. Enabling requires ffmpeg with Freetype support and consumes some CPU resources.",
+        "items": [
+          "Enable",
+          "Disable"
+        ]
+      }
+      context.step = "nowPlayingMenuResponse";
+      callback(respDict);
       break;
     case "actionSuccess":
       var options = ["iTunes Plugin Configuration"];
