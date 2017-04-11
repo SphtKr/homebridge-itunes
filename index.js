@@ -85,6 +85,14 @@ debug(script)
   }
 }
 
+ITunesPlatform.prototype.removeAccessory = function(accessory) {
+  if (accessory) {
+    var mac = accessory.context.mac;
+    this.api.unregisterPlatformAccessories("homebridge-amazondash", "AmazonDash", [accessory]);
+    delete this.accessories[mac];
+  }
+}
+
 ITunesPlatform.prototype.configureAccessory = function(accessory) {
   if(accessory.context.iTunesMac){
     this.configurePrimaryAccessory(accessory);
@@ -514,8 +522,8 @@ ITunesPlatform.prototype.syncAccessories = function() {
             onCx.updateValue(rawDevice.selected);
 
           if(!accessory.reachable) accessory.updateReachability(true);
-        } else {
-          this.addAirPlayAccessory(rawDevice);
+        //} else {
+        //  this.addAirPlayAccessory(rawDevice);
         }
       }
       // Set any devices now missing to unreachable...
@@ -707,5 +715,174 @@ ITunesPlatform.prototype.removeAccessory = function(accessory) {
     var mac = accessory.context.rawDevice.mac;
     this.api.unregisterPlatformAccessories("homebridge-itunes", "iTunes", [accessory]);
     delete this.accessories[mac];
+  }
+}
+
+ITunesPlatform.prototype.configurationRequestHandler = function(context, request, callback) {
+  if (request && request.type === "Terminate") {
+    return;
+  }
+  debug("called configurationRequestHandler with step " + context.step);
+
+  context.newConfig = this.config;
+
+  if (!context.step) {
+    context.step = "topMenu";
+  } else if(context.step == "topMenuResponse"){
+    var selection = request.response.selections[0];
+    switch(selection){
+      case 0:
+        context.step = "preferencesMenu";
+        break;
+      case 1:
+        context.step = "addDevicesMenu";
+        break;
+      case 2:
+        context.step = "removeDevicesMenu";
+        break;
+    }
+  } else if(context.step == "preferencesMenuResponse"){
+    var selection = request.response.selections[0];
+    switch(selection){
+      case 0:
+        context.step = "playlistMenu";
+        break;
+      case 1:
+        context.step = "pollingMenu";
+        break;
+      case 2:
+        context.step = "nowPlayingMenu";
+        break;
+    }
+  } else if(context.step == "playlistMenuResponse"){
+    var selection = request.response.selections[0];
+    var playlist = context.options[selection];
+    context.newConfig.autoplay_playlist = playlist;
+
+    context.navOptions = [{label: "Back to Preferences", step: "preferencesMenu"}];
+    context.step = "actionSuccess";
+  } else if(context.step == "actionSuccessResponse"){
+    context.step = [{step: 'topMenu'}].concat(context.navOptions.concat({step: 'finish'}))[request.response.selections[0]].step;
+    delete context.navOptions;
+  }
+
+  if(context.step == "finish"){
+    callback(null, "platform", true, context.newConfig);
+    return;
+  }
+
+  switch (context.step) {
+    case "topMenu":
+      var respDict = {
+        "type": "Interface",
+        "interface": "list",
+        "title": "Configure iTunes Plugin",
+        "items": [
+          "Preferences",
+          "Add Devices",
+          "Remove Devices"
+        ]
+      }
+      context.step = "topMenuResponse";
+      callback(respDict);
+      break;
+    case "preferencesMenu":
+      var respDict = {
+        "type": "Interface",
+        "interface": "list",
+        "title": "Preferences",
+        "items": [
+          "AutoPlay Playlist",
+          "Polling Interval",
+          "Now Playing Feature"
+        ]
+      }
+      context.step = "preferencesMenuResponse";
+      callback(respDict);
+      break;
+    case "playlistMenu":
+      var respDict = {
+        "type": "Interface",
+        "interface": "instruction",
+        "title": "Retrieving Playlists",
+        "detail": "Please wait...",
+        "showNextButton": false
+      }
+      callback(respDict);
+      // That'll hold 'em...
+
+      var tell = 'tell application "iTunes" \n'
+        + 'set userPlaylists to {} \n'
+        + '	repeat with aPlaylist in (get playlists) \n'
+          + '	copy {the name of aPlaylist} to the end of userPlaylists \n'
+        + 'end repeat \n'
+        + 'get userPlaylists \n'
+      + 'end tell';
+      ITunesPlatform.queueScript(tell, function(err, rtn) {
+        if(err || !Array.isArray(rtn)){
+          var respDict = {
+            "type": "Interface",
+            "interface": "instruction",
+            "title": "Unexpected Problem",
+            "detail": "There was a problem retrieving playlists. Please try again later.",
+            "showNextButton": true
+          }
+          context.step = "topMenu";
+        } else {
+          var options = []; for(var i = 0; i < rtn.length; i++) options.push(rtn[i][0]);
+          var respDict = {
+            "type": "Interface",
+            "interface": "list",
+            "title": "Select AutoPlay Playlist",
+            "items": options
+          }
+          context.options = options;
+          context.step = "playlistMenuResponse";
+        }
+        callback(respDict);
+      }.bind(this));
+      break;
+    case "actionSuccess":
+      var options = ["iTunes Plugin Configuration"];
+      for(var i = 0; i < context.navOptions.length; i++) options.push(context.navOptions[i].label);
+      options.push("Done");
+      var respDict = {
+        "type": "Interface",
+        "interface": "list",
+        "title": "Success!",
+        "items": options
+      }
+      context.step = "actionSuccessResponse";
+      callback(respDict);
+      break;
+    case "finish":
+      var self = this;
+      delete context.step;
+      var newConfig = this.config;
+      var newButtons = Object.keys(this.accessories).map(function(k){
+        var accessory = self.accessories[k];
+        var button = {
+          'name': accessory.displayName,
+          'mac': accessory.context.mac
+        };
+        return button;
+      });
+      newConfig.buttons = newButtons;
+
+      callback(null, "platform", true, newConfig);
+      break;
+
+    default:
+      var respDict = {
+        "type": "Interface",
+        "interface": "instruction",
+        "title": "Not Implemented",
+        "detail": "This feature is not yet implemented.",
+        "showNextButton": true
+      }
+      context.step = "topMenu";
+      callback(respDict);
+      break;
+
   }
 }

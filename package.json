@@ -19,13 +19,12 @@
     "HomeKit"
   ],
   "engines": {
-   "node": ">=4.0.0",
-   "homebridge": ">=0.3.0"
- },
-
+    "node": ">=4.0.0",
+    "homebridge": ">=0.3.0"
+  },
   "dependencies": {
     "debug": "^2.2.0",
-    "node-osascript": "^1.0.4",
+    "node-osascript": "^2.0.0",
     "wordwrap": "^1.0.0"
   },
   "author": "S'pht'Kr <fthasphtkr@gmail.com> (https://github.com/SphtKr)",
