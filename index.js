@@ -473,42 +473,18 @@ ITunesPlatform.prototype.syncAccessories = function() {
     }.bind(this));
   }
 
-  // Get the id and name of all the AirPlay devices...
-  var tell = 'tell application "iTunes"\n'
-      + 'set apDevMap to {}\n'
-      + 'repeat with aDevice in (AirPlay devices)\n'
-        //+ "copy {id:aDevice's id, name:aDevice's name, mac:aDevice's network address} to the end of the apDevMap\n"
-        + "copy {aDevice's id, aDevice's name, aDevice's network address, aDevice's selected, aDevice's sound volume} to the end of the apDevMap\n"
-      + 'end repeat\n'
-      + 'get apDevMap\n'
-  + 'end tell\n';
-
-  ITunesPlatform.queueScript(tell, function(err, rtn) {
-    if (err) {
-      this.log(err);
-      this.log("ERROR: Failed getting AirPlay devices--iTunes may still be launching. Trying again in two seconds.");
-      syncAgainIn(2000);
-      return;
-    }
-    if (Array.isArray(rtn)) {
-      for(var i = 0; i < rtn.length; i++)
-        rtn[i] = {
-          id: rtn[i][0],
-          name: rtn[i][1],
-          mac: (rtn[i][2] == "missing value" ? null : rtn[i][2]),
-          selected: rtn[i][3],
-          volume: parseInt(rtn[i][4])
-        };
+  this.getAirPlayDevices(function(err, rtn){
+    if(err){
+      debug("Failed getting devices, try again at next sync interval...", err);
+    } else {
       this.rawDevices = rtn;
-
       // Update id's and values and add any devices we didn't have before...
       var foundMacs = {};
-      for (var i = 0; i < this.rawDevices.length; i++) {
-        var rawDevice = this.rawDevices[i];
-        if(!rawDevice.mac) rawDevice.mac = '00-host-audio';
-        foundMacs[rawDevice.mac] = true;
+      for (var i = 0; i < rtn.length; i++) {
+        var rawDevice = rtn[i];
+        foundMacs[rawDevice.mac] = true; // for catching missing devices below...
 
-        if (this.accessories[rawDevice.mac]) {
+        if (rawDevice.hasAccessory) {
           var accessory = this.accessories[rawDevice.mac];
 
           accessory.context.rawDevice = rawDevice;
@@ -522,8 +498,6 @@ ITunesPlatform.prototype.syncAccessories = function() {
             onCx.updateValue(rawDevice.selected);
 
           if(!accessory.reachable) accessory.updateReachability(true);
-        //} else {
-        //  this.addAirPlayAccessory(rawDevice);
         }
       }
       // Set any devices now missing to unreachable...
@@ -535,6 +509,38 @@ ITunesPlatform.prototype.syncAccessories = function() {
     }
   }.bind(this));
 
+}
+
+ITunesPlatform.prototype.getAirPlayDevices = function(callback){
+  // Get the id and name of all the AirPlay devices...
+  var tell = 'tell application "iTunes"\n'
+      + 'set apDevMap to {}\n'
+      + 'repeat with aDevice in (AirPlay devices)\n'
+        + "copy {aDevice's id, aDevice's name, aDevice's network address, aDevice's selected, aDevice's sound volume} to the end of the apDevMap\n"
+      + 'end repeat\n'
+      + 'get apDevMap\n'
+  + 'end tell\n';
+
+  ITunesPlatform.queueScript(tell, function(err, rtn) {
+    if (err) {
+      callback(err);
+      return;
+    }
+    if (Array.isArray(rtn)) {
+      for(var i = 0; i < rtn.length; i++){
+        var m = rtn[i][2] == "missing value" ? '00-host-audio' : rtn[i][2];
+        rtn[i] = {
+          id: rtn[i][0],
+          name: rtn[i][1],
+          mac: m,
+          selected: rtn[i][3],
+          volume: parseInt(rtn[i][4]),
+          hasAccessory: !!this.accessories[m]
+        };
+      }
+      callback(null, rtn);
+    }
+  }.bind(this));
 }
 
 ITunesPlatform.prototype.syncMediaInformation = function(){
@@ -710,9 +716,10 @@ ITunesPlatform.prototype.addAirPlayAccessory = function(rawDevice) {
   this.api.registerPlatformAccessories("homebridge-itunes", "iTunes", [newAccessory]);
 }
 
-ITunesPlatform.prototype.removeAccessory = function(accessory) {
+ITunesPlatform.prototype.removeAirPlayAccessory = function(accessory) {
   if (accessory) {
     var mac = accessory.context.rawDevice.mac;
+    accessory.context.rawDevice.hasAccessory = false;
     this.api.unregisterPlatformAccessories("homebridge-itunes", "iTunes", [accessory]);
     delete this.accessories[mac];
   }
@@ -724,8 +731,11 @@ ITunesPlatform.prototype.configurationRequestHandler = function(context, request
   }
   debug("called configurationRequestHandler with step " + context.step);
 
-  context.newConfig = this.config;
+  var platform = this;
 
+  if(!context.newConfig) context.newConfig = this.config;
+
+  // Responses, or other actions that may change the currnet step...
   if (!context.step) {
     context.step = "topMenu";
   } else if(context.step == "topMenuResponse"){
@@ -759,6 +769,7 @@ ITunesPlatform.prototype.configurationRequestHandler = function(context, request
     var playlist = context.options[selection];
     context.newConfig.autoplay_playlist = playlist;
     context.navOptions = [{label: "Back to Preferences", step: "preferencesMenu"}];
+    delete context.options;
     context.step = "actionSuccess";
   } else if(context.step == "pollIntervalMenuResponse"){
     var selection = request.response.selections[0];
@@ -770,6 +781,26 @@ ITunesPlatform.prototype.configurationRequestHandler = function(context, request
     context.newConfig.enable_now_playing = [true, false][selection];
     context.navOptions = [{label: "Back to Preferences", step: "preferencesMenu"}];
     context.step = "actionSuccess";
+  } else if(context.step == "addDevicesMenuResponse"){
+    var selection = request.response.selections[0];
+    if(selection == 0){
+      for(var i = 1; i < context.options.length; i++) platform.addAirPlayAccessory(context.options[i]);
+    } else {
+      platform.addAirPlayAccessory(context.options[selection]);
+    }
+    delete context.options;
+    context.navOptions = [{label: "Add more devices", step: "addDevicesMenu"}];
+    context.step = "actionSuccess";
+  } else if(context.step == "removeDevicesMenuResponse"){
+    var selection = request.response.selections[0];
+    if(selection == 0){
+      for(var i = 1; i < context.options.length; i++) platform.removeAirPlayAccessory(context.options[i]);
+    } else {
+      platform.removeAirPlayAccessory(context.options[selection]);
+    }
+    delete context.options;
+    context.navOptions = [{label: "Remove more devices", step: "removeDevicesMenu"}];
+    context.step = "actionSuccess";
   } else if(context.step == "actionSuccessResponse"){
     context.step = [{step: 'topMenu'}].concat(context.navOptions.concat({step: 'finish'}))[request.response.selections[0]].step;
     delete context.navOptions;
@@ -780,6 +811,7 @@ ITunesPlatform.prototype.configurationRequestHandler = function(context, request
     return;
   }
 
+  // Menu options and mostly non-interactive steps...
   switch (context.step) {
     case "topMenu":
       var respDict = {
@@ -880,6 +912,65 @@ ITunesPlatform.prototype.configurationRequestHandler = function(context, request
         ]
       }
       context.step = "nowPlayingMenuResponse";
+      callback(respDict);
+      break;
+    case "addDevicesMenu":
+      var respDict = {
+        "type": "Interface",
+        "interface": "instruction",
+        "title": "Retrieving Devices",
+        "detail": "Please wait...",
+        "showNextButton": false
+      }
+      callback(respDict);
+      // That'll hold 'em...
+
+      platform.getAirPlayDevices(function(err, rtn){
+        if(err || !Array.isArray(rtn)){
+          var respDict = {
+            "type": "Interface",
+            "interface": "instruction",
+            "title": "Unexpected Problem",
+            "detail": "There was a problem retrieving the list of available devices. Please try again later.",
+            "showNextButton": true
+          }
+          context.step = "topMenu";
+        } else {
+          var optionDevices = [{}];
+          var options = ["Add All"]; for(var i = 0; i < rtn.length; i++) if(!rtn[i].hasAccessory){
+            options.push(rtn[i].name);
+            optionDevices.push(rtn[i]);
+          }
+          var respDict = {
+            "type": "Interface",
+            "interface": "list",
+            "title": "Select devices to add",
+            "items": options
+          }
+          context.options = optionDevices;
+          context.step = "addDevicesMenuResponse";
+        }
+        callback(respDict);
+      }.bind(this));
+      break;
+    case "removeDevicesMenu":
+      var options = ["Remove All"];
+      var optionAccessories = [{}];
+      for(var k in platform.accessories){
+        var a = platform.accessories[k];
+        if(a && a.context && a.context.rawDevice){
+          options.push(a.context.rawDevice.name);
+          optionAccessories.push(a);
+        }
+      }
+      var respDict = {
+        "type": "Interface",
+        "interface": "list",
+        "title": "Select devices to remove",
+        "items": options
+      }
+      context.options = optionAccessories;
+      context.step = "removeDevicesMenuResponse";
       callback(respDict);
       break;
     case "actionSuccess":
