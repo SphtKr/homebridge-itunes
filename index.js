@@ -763,44 +763,62 @@ ITunesPlatform.prototype.configurationRequestHandler = function(context, request
       case 2:
         context.step = "nowPlayingMenu";
         break;
+      case 3:
+        context.step = "topMenu";
+        break;
     }
   } else if(context.step == "playlistMenuResponse"){
     var selection = request.response.selections[0];
-    var playlist = context.options[selection];
-    context.newConfig.autoplay_playlist = playlist;
-    context.navOptions = [{label: "Back to Preferences", step: "preferencesMenu"}];
+    if(selection == context.options.length){
+      context.step = "topMenu";
+    } else {
+      var playlist = context.options[selection];
+      context.newConfig.autoplay_playlist = playlist;
+      context.navOptions = [{label: "Back to Preferences", step: "preferencesMenu"}];
+      context.unsaved = true;
+      context.step = "actionSuccess";
+    }
     delete context.options;
-    context.step = "actionSuccess";
   } else if(context.step == "pollIntervalMenuResponse"){
     var selection = request.response.selections[0];
     context.newConfig.poll_interval = [1, 2, 5, 10, 30][selection];
     context.navOptions = [{label: "Back to Preferences", step: "preferencesMenu"}];
+    context.unsaved = true;
     context.step = "actionSuccess";
   } else if(context.step == "nowPlayingMenuResponse"){
     var selection = request.response.selections[0];
     context.newConfig.enable_now_playing = [true, false][selection];
     context.navOptions = [{label: "Back to Preferences", step: "preferencesMenu"}];
+    context.unsaved = true;
     context.step = "actionSuccess";
   } else if(context.step == "addDevicesMenuResponse"){
     var selection = request.response.selections[0];
-    if(selection == 0){
-      for(var i = 1; i < context.options.length; i++) platform.addAirPlayAccessory(context.options[i]);
+    if(selection == context.options.length){
+      context.step = "topMenu";
     } else {
-      platform.addAirPlayAccessory(context.options[selection]);
+      if(selection == 0){
+        for(var i = 1; i < context.options.length; i++) platform.addAirPlayAccessory(context.options[i]);
+      } else {
+        platform.addAirPlayAccessory(context.options[selection]);
+      }
+      context.navOptions = [{label: "Add more devices", step: "addDevicesMenu"}];
+      context.step = "actionSuccess";
     }
     delete context.options;
-    context.navOptions = [{label: "Add more devices", step: "addDevicesMenu"}];
-    context.step = "actionSuccess";
   } else if(context.step == "removeDevicesMenuResponse"){
     var selection = request.response.selections[0];
-    if(selection == 0){
-      for(var i = 1; i < context.options.length; i++) platform.removeAirPlayAccessory(context.options[i]);
+    if(selection == context.options.length){
+      context.step = "topMenu";
     } else {
-      platform.removeAirPlayAccessory(context.options[selection]);
+      if(selection == 0){
+        for(var i = 1; i < context.options.length; i++) platform.removeAirPlayAccessory(context.options[i]);
+      } else {
+        platform.removeAirPlayAccessory(context.options[selection]);
+      }
+      context.navOptions = [{label: "Remove more devices", step: "removeDevicesMenu"}];
+      context.step = "actionSuccess";
     }
     delete context.options;
-    context.navOptions = [{label: "Remove more devices", step: "removeDevicesMenu"}];
-    context.step = "actionSuccess";
   } else if(context.step == "actionSuccessResponse"){
     context.step = [{step: 'topMenu'}].concat(context.navOptions.concat({step: 'finish'}))[request.response.selections[0]].step;
     delete context.navOptions;
@@ -835,7 +853,8 @@ ITunesPlatform.prototype.configurationRequestHandler = function(context, request
         "items": [
           "AutoPlay Playlist",
           "Polling Interval",
-          "Now Playing Feature"
+          "Now Playing Feature",
+          "◀ Back"
         ]
       }
       context.step = "preferencesMenuResponse";
@@ -875,7 +894,7 @@ ITunesPlatform.prototype.configurationRequestHandler = function(context, request
             "type": "Interface",
             "interface": "list",
             "title": "Select AutoPlay Playlist",
-            "items": options
+            "items": options.concat(["◀ Back"])
           }
           context.options = options;
           context.step = "playlistMenuResponse";
@@ -945,7 +964,7 @@ ITunesPlatform.prototype.configurationRequestHandler = function(context, request
             "type": "Interface",
             "interface": "list",
             "title": "Select devices to add",
-            "items": options
+            "items": options.concat(["◀ Back"])
           }
           context.options = optionDevices;
           context.step = "addDevicesMenuResponse";
@@ -967,7 +986,7 @@ ITunesPlatform.prototype.configurationRequestHandler = function(context, request
         "type": "Interface",
         "interface": "list",
         "title": "Select devices to remove",
-        "items": options
+        "items": options.concat(["◀ Back"])
       }
       context.options = optionAccessories;
       context.step = "removeDevicesMenuResponse";
@@ -976,11 +995,12 @@ ITunesPlatform.prototype.configurationRequestHandler = function(context, request
     case "actionSuccess":
       var options = ["iTunes Plugin Configuration"];
       for(var i = 0; i < context.navOptions.length; i++) options.push(context.navOptions[i].label);
-      options.push("Done");
+      options.push(context.unsaved ? "Save and Finish" : "Finish");
       var respDict = {
         "type": "Interface",
         "interface": "list",
         "title": "Success!",
+        "detail": context.unsaved ? "You have unsaved preferences. Choose \"Save and Finish\" before exiting." : '',
         "items": options
       }
       context.step = "actionSuccessResponse";
@@ -999,7 +1019,7 @@ ITunesPlatform.prototype.configurationRequestHandler = function(context, request
         return button;
       });
       newConfig.buttons = newButtons;
-
+      context.unsaved = false;
       callback(null, "platform", true, newConfig);
       break;
 
