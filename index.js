@@ -10,6 +10,8 @@ var HKMTGen = require('./HomeKitMediaTypes.js');
 var spawn = require('child_process').spawn;
 var debug = require('debug')('iTunes');
 
+var accessoryModelVersion = 2;
+
 module.exports = function(homebridge) {
   Accessory = homebridge.platformAccessory;
   Service = homebridge.hap.Service;
@@ -82,14 +84,6 @@ debug("Queue depth " + ITunesPlatform.scriptQueue.length);
 debug(script)
   if(!ITunesPlatform.scriptQueueIsRunning){
     ITunesPlatform.runScriptQueue();
-  }
-}
-
-ITunesPlatform.prototype.removeAccessory = function(accessory) {
-  if (accessory) {
-    var mac = accessory.context.mac;
-    this.api.unregisterPlatformAccessories("homebridge-amazondash", "AmazonDash", [accessory]);
-    delete this.accessories[mac];
   }
 }
 
@@ -484,21 +478,22 @@ ITunesPlatform.prototype.syncAccessories = function() {
         var rawDevice = rtn[i];
         foundMacs[rawDevice.mac] = true; // for catching missing devices below...
 
-        if (rawDevice.hasAccessory) {
-          var accessory = this.accessories[rawDevice.mac];
-
+        var accessory = this.accessories[rawDevice.mac];
+        if(!accessory){ // Never seen before?
+          var accessory = this.addAirPlayAccessory(rawDevice);
+        } else {
           accessory.context.rawDevice = rawDevice;
-
-          var volCx = accessory.getService(HomeKitMediaTypes.AudioDeviceService).getCharacteristic(HomeKitMediaTypes.AudioVolume);
-          if(volCx.value != rawDevice.volume)
-            volCx.updateValue(rawDevice.volume);
-
-          var onCx = accessory.getService(Service.Switch).getCharacteristic(Characteristic.On);
-          if(onCx.value != rawDevice.selected)
-            onCx.updateValue(rawDevice.selected);
-
-          if(!accessory.reachable) accessory.updateReachability(true);
         }
+
+        var volCx = accessory.getService(HomeKitMediaTypes.AudioDeviceService).getCharacteristic(HomeKitMediaTypes.AudioVolume);
+        if(volCx.value != rawDevice.volume)
+          volCx.updateValue(rawDevice.volume);
+
+        var onCx = accessory.getService(Service.Switch).getCharacteristic(Characteristic.On);
+        if(onCx.value != rawDevice.selected)
+          onCx.updateValue(rawDevice.selected);
+
+        if(!accessory.reachable) accessory.updateReachability(true);
       }
       // Set any devices now missing to unreachable...
       for(var m in this.accessories){
@@ -535,7 +530,7 @@ ITunesPlatform.prototype.getAirPlayDevices = function(callback){
           mac: m,
           selected: rtn[i][3],
           volume: parseInt(rtn[i][4]),
-          hasAccessory: !!this.accessories[m]
+          isRegistered: (this.accessories[m] && this.accessories[m].context.rawDevice.isRegistered) //NOTE: Careful! Potentially circular!
         };
       }
       callback(null, rtn);
@@ -670,6 +665,7 @@ ITunesPlatform.prototype.addPrimaryAccessory = function(mac){
 
   var newAccessory = new Accessory(name, uuid, 1); // 1 = Accessory.Category.OTHER
   newAccessory.context.iTunesMac = mac;
+  newAccessory.context.modelVersion = accessoryModelVersion;
 
   newAccessory.addService(Service.Switch, "Playing State", "playstate").name = "playstate";
   newAccessory.addService(HomeKitMediaTypes.AudioDeviceService, name);
@@ -689,10 +685,11 @@ ITunesPlatform.prototype.addPrimaryAccessory = function(mac){
 
   this.configureAccessory(newAccessory);
 
-  this.api.registerPlatformAccessories("homebridge-itunes", "iTunes", [newAccessory]);
+  //this.api.registerPlatformAccessories("homebridge-itunes", "iTunes", [newAccessory]);
 
   // we came here from an aborted sync, start it again...
-  this.syncAccessories();
+  //this.syncAccessories();
+  return newAccessory;
 }
 
 ITunesPlatform.prototype.addAirPlayAccessory = function(rawDevice) {
@@ -701,6 +698,7 @@ ITunesPlatform.prototype.addAirPlayAccessory = function(rawDevice) {
 
   var newAccessory = new Accessory(rawDevice.name, uuid, 1); // 1 = Accessory.Category.OTHER
   newAccessory.context.rawDevice = rawDevice;
+  newAccessory.context.modelVersion = accessoryModelVersion;
 
   newAccessory.addService(Service.Switch, rawDevice.name);
   newAccessory.addService(HomeKitMediaTypes.AudioDeviceService, rawDevice.name);
@@ -712,16 +710,29 @@ ITunesPlatform.prototype.addAirPlayAccessory = function(rawDevice) {
   .setCharacteristic(Characteristic.SerialNumber, rawDevice.mac);
 
   this.configureAccessory(newAccessory);
+  return newAccessory;
+  //this.api.registerPlatformAccessories("homebridge-itunes", "iTunes", [newAccessory]);
+}
 
+ITunesPlatform.prototype.registerAccessory = function(rawDevice) {
+  var newAccessory;
+  if(rawDevice.iTunesMac){
+    newAccessory = this.primaryAccessory || this.addPrimaryAccessory(rawDevice.iTunesMac);
+    newAccessory.context.isRegistered = true;
+  } else {
+    newAccessory = this.accessories[rawDevice.mac] || this.addAirPlayAccessory(rawDevice);
+    newAccessory.context.rawDevice.isRegistered = true;
+  }
   this.api.registerPlatformAccessories("homebridge-itunes", "iTunes", [newAccessory]);
 }
 
-ITunesPlatform.prototype.removeAirPlayAccessory = function(accessory) {
+ITunesPlatform.prototype.removeAccessory = function(accessory) {
   if (accessory) {
-    var mac = accessory.context.rawDevice.mac;
-    accessory.context.rawDevice.hasAccessory = false;
+    if(accessory.context.rawDevice)
+      accessory.context.rawDevice.isRegistered = false;
+    else
+      accessory.context.isRegistered = false;
     this.api.unregisterPlatformAccessories("homebridge-itunes", "iTunes", [accessory]);
-    delete this.accessories[mac];
   }
 }
 
@@ -796,10 +807,16 @@ ITunesPlatform.prototype.configurationRequestHandler = function(context, request
     if(selection == context.options.length){
       context.step = "topMenu";
     } else {
+      var additions = [];
       if(selection == 0){
-        for(var i = 1; i < context.options.length; i++) platform.addAirPlayAccessory(context.options[i]);
+        for(var i = 1; i < context.options.length; i++) additions.push(context.options[i]);
+      } else if(context.options[selection].iTunesMac){
+        additions.push(context.options[selection]);
       } else {
-        platform.addAirPlayAccessory(context.options[selection]);
+        additions.push(context.options[selection]);
+      }
+      for(var i = 0; i < additions.length; i++){
+        this.registerAccessory(additions[i]);
       }
       context.navOptions = [{label: "Add more devices", step: "addDevicesMenu"}];
       context.step = "actionSuccess";
@@ -811,9 +828,9 @@ ITunesPlatform.prototype.configurationRequestHandler = function(context, request
       context.step = "topMenu";
     } else {
       if(selection == 0){
-        for(var i = 1; i < context.options.length; i++) platform.removeAirPlayAccessory(context.options[i]);
+        for(var i = 1; i < context.options.length; i++) platform.removeAccessory(context.options[i]);
       } else {
-        platform.removeAirPlayAccessory(context.options[selection]);
+        platform.removeAccessory(context.options[selection]);
       }
       context.navOptions = [{label: "Remove more devices", step: "removeDevicesMenu"}];
       context.step = "actionSuccess";
@@ -956,7 +973,12 @@ ITunesPlatform.prototype.configurationRequestHandler = function(context, request
           context.step = "topMenu";
         } else {
           var optionDevices = [{}];
-          var options = ["Add All"]; for(var i = 0; i < rtn.length; i++) if(!rtn[i].hasAccessory){
+          var options = ["Add All"];
+          if(this.primaryAccessory && !this.primaryAccessory.context.isRegistered){
+            options.push("iTunes (playback controls)");
+            optionDevices.push(this.primaryAccessory.context); // NOTE: NOT the same as rawDevice
+          }
+          for(var i = 0; i < rtn.length; i++) if(!rtn[i].isRegistered){
             options.push(rtn[i].name);
             optionDevices.push(rtn[i]);
           }
@@ -975,9 +997,13 @@ ITunesPlatform.prototype.configurationRequestHandler = function(context, request
     case "removeDevicesMenu":
       var options = ["Remove All"];
       var optionAccessories = [{}];
+      if(this.primaryAccessory && this.primaryAccessory.context.isRegistered){
+        options.push("iTunes (playback controls)");
+        optionAccessories.push(this.primaryAccessory);
+      }
       for(var k in platform.accessories){
         var a = platform.accessories[k];
-        if(a && a.context && a.context.rawDevice){
+        if(a && a.context && a.context.rawDevice && a.context.rawDevice.isRegistered){
           options.push(a.context.rawDevice.name);
           optionAccessories.push(a);
         }
