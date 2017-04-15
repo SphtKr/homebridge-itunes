@@ -42,7 +42,10 @@ function ITunesPlatform(log, config, api) {
   self.config = config || { "platform": "iTunes" };
   self.accessories = {};
   self.syncTimer = null;
-  self.pollInterval = 2000;
+  self.pollInterval = self.config.poll_interval || 2000;
+  if(self.pollInterval < 100) self.pollInterval *= 1000; // Just in case someone put a seconds value in config.json...
+  self.autoPlayPlaylist = self.config.autoplay_playlist || "AutoPlay";
+  self.enableNowPlaying = self.config.enable_now_playing;
 
   if (api) {
     self.api = api;
@@ -85,6 +88,14 @@ debug(script)
   if(!ITunesPlatform.scriptQueueIsRunning){
     ITunesPlatform.runScriptQueue();
   }
+}
+
+ITunesPlatform.escapeAppleScriptString_re = /[\\\n\t\r"]/g;
+ITunesPlatform.escapeAppleScriptString_trtable = { '\\': '\\\\', '\n':'\\n', '\t':'\\t', '\r':'\\r', '"':'\\"' };
+ITunesPlatform.escapeAppleScriptString = function(string){
+  return string.replace(ITunesPlatform.escapeAppleScriptString_re, function(match) {
+    return ITunesPlatform.escapeAppleScriptString_trtable[match];
+  });
 }
 
 ITunesPlatform.prototype.configureAccessory = function(accessory) {
@@ -137,12 +148,13 @@ ITunesPlatform.prototype.configurePrimaryAccessory = function(accessory) {
   .on('set', function(newVal, callback){
     switch (newVal) {
       case HomeKitMediaTypes.PlaybackState.PLAYING:
+        var safepl = ITunesPlatform.escapeAppleScriptString(this.autoPlayPlaylist);
         var tell =
           'tell application "iTunes"\n'
           + 'if player state is paused or (exists current track) then play\n'
           + 'if player state is stopped then\n'
-            + 'if exists user playlist "AutoPlay" then\n'
-		          + 'play user playlist "AutoPlay"\n'
+            + 'if exists user playlist "' + safepl + '" then\n'
+		          + 'play user playlist "' + safepl + '"\n'
             + 'else\n'
 	            + 'play (some playlist whose special kind is Music)\n'
             + 'end if\n'
@@ -636,6 +648,10 @@ ITunesPlatform.prototype.writeMediaInformationFiles = function(){
     debug(e);
   }
 
+  if(!this.enableNowPlaying){
+    return; // Early out!
+  }
+
   if(name != ITunesPlatform._lastSeenTrackName){
     osascript.executeFile(path.join(__dirname, 'scripts', 'GetAlbumArtwork.applescript'));
   }
@@ -785,6 +801,7 @@ ITunesPlatform.prototype.configurationRequestHandler = function(context, request
     } else {
       var playlist = context.options[selection];
       context.newConfig.autoplay_playlist = playlist;
+      this.autoPlayPlaylist = playlist;
       context.navOptions = [{label: "Back to Preferences", step: "preferencesMenu"}];
       context.unsaved = true;
       context.step = "actionSuccess";
@@ -792,13 +809,15 @@ ITunesPlatform.prototype.configurationRequestHandler = function(context, request
     delete context.options;
   } else if(context.step == "pollIntervalMenuResponse"){
     var selection = request.response.selections[0];
-    context.newConfig.poll_interval = [1, 2, 5, 10, 30][selection];
+    context.newConfig.poll_interval = [1000, 2000, 5000, 10000, 30000][selection];
+    this.pollInterval = context.newConfig.poll_interval;
     context.navOptions = [{label: "Back to Preferences", step: "preferencesMenu"}];
     context.unsaved = true;
     context.step = "actionSuccess";
   } else if(context.step == "nowPlayingMenuResponse"){
     var selection = request.response.selections[0];
     context.newConfig.enable_now_playing = [true, false][selection];
+    this.enableNowPlaying = context.newConfig.enable_now_playing;
     context.navOptions = [{label: "Back to Preferences", step: "preferencesMenu"}];
     context.unsaved = true;
     context.step = "actionSuccess";
