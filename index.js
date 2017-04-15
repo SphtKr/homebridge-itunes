@@ -751,14 +751,14 @@ ITunesPlatform.prototype.configurationRequestHandler = function(context, request
     context.step = "topMenu";
   } else if(context.step == "topMenuResponse"){
     var selection = request.response.selections[0];
-    switch(selection){
-      case 0:
+    switch(context.options[selection]){
+      case "Preferences":
         context.step = "preferencesMenu";
         break;
-      case 1:
+      case "Add Devices":
         context.step = "addDevicesMenu";
         break;
-      case 2:
+      case "Remove Devices":
         context.step = "removeDevicesMenu";
         break;
     }
@@ -851,16 +851,44 @@ ITunesPlatform.prototype.configurationRequestHandler = function(context, request
     case "topMenu":
       var respDict = {
         "type": "Interface",
-        "interface": "list",
-        "title": "Configure iTunes Plugin",
-        "items": [
-          "Preferences",
-          "Add Devices",
-          "Remove Devices"
-        ]
+        "interface": "instruction",
+        "title": "Checking Device Status",
+        "detail": "Please wait...",
+        "showNextButton": false
       }
-      context.step = "topMenuResponse";
       callback(respDict);
+      // That'll hold 'em...
+
+      platform.getAirPlayDevices(function(err, rtn){
+        if(err || !Array.isArray(rtn)){
+          var respDict = {
+            "type": "Interface",
+            "interface": "instruction",
+            "title": "Unexpected Problem",
+            "detail": "There was a problem retrieving the list of available devices. Please try again later.",
+            "showNextButton": true
+          }
+          context.step = "topMenu";
+        } else {
+          var options = [];
+          var paRegistered = this.primaryAccessory && this.primaryAccessory.context.isRegistered;
+          var devsRegistered = rtn.filter(function(rd){return !!rd.isRegistered});
+          var devsUnregistered = rtn.filter(function(rd){return !rd.isRegistered});
+          if(!paRegistered || devsUnregistered.length > 0) options.push("Add Devices");
+          if(paRegistered || devsRegistered.length > 0) options.push("Remove Devices");
+          options.push('Preferences');
+
+          var respDict = {
+            "type": "Interface",
+            "interface": "list",
+            "title": "Configure iTunes Plugin",
+            "items": options
+          }
+          context.options = options;
+          context.step = "topMenuResponse";
+        }
+        callback(respDict);
+      }.bind(this));
       break;
     case "preferencesMenu":
       var respDict = {
