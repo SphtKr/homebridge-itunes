@@ -10,6 +10,8 @@ var HKMTGen = require('./HomeKitMediaTypes.js');
 var spawn = require('child_process').spawn;
 var debug = require('debug')('iTunes');
 
+var accessoryModelVersion = 2;
+
 module.exports = function(homebridge) {
   Accessory = homebridge.platformAccessory;
   Service = homebridge.hap.Service;
@@ -40,7 +42,10 @@ function ITunesPlatform(log, config, api) {
   self.config = config || { "platform": "iTunes" };
   self.accessories = {};
   self.syncTimer = null;
-  self.pollInterval = 2000;
+  self.pollInterval = self.config.poll_interval || 2000;
+  if(self.pollInterval < 100) self.pollInterval *= 1000; // Just in case someone put a seconds value in config.json...
+  self.autoPlayPlaylist = self.config.autoplay_playlist || "AutoPlay";
+  self.enableNowPlaying = self.config.enable_now_playing;
 
   if (api) {
     self.api = api;
@@ -83,6 +88,14 @@ debug(script)
   if(!ITunesPlatform.scriptQueueIsRunning){
     ITunesPlatform.runScriptQueue();
   }
+}
+
+ITunesPlatform.escapeAppleScriptString_re = /[\\\n\t\r"]/g;
+ITunesPlatform.escapeAppleScriptString_trtable = { '\\': '\\\\', '\n':'\\n', '\t':'\\t', '\r':'\\r', '"':'\\"' };
+ITunesPlatform.escapeAppleScriptString = function(string){
+  return string.replace(ITunesPlatform.escapeAppleScriptString_re, function(match) {
+    return ITunesPlatform.escapeAppleScriptString_trtable[match];
+  });
 }
 
 ITunesPlatform.prototype.configureAccessory = function(accessory) {
@@ -135,12 +148,13 @@ ITunesPlatform.prototype.configurePrimaryAccessory = function(accessory) {
   .on('set', function(newVal, callback){
     switch (newVal) {
       case HomeKitMediaTypes.PlaybackState.PLAYING:
+        var safepl = ITunesPlatform.escapeAppleScriptString(this.autoPlayPlaylist);
         var tell =
           'tell application "iTunes"\n'
           + 'if player state is paused or (exists current track) then play\n'
           + 'if player state is stopped then\n'
-            + 'if exists user playlist "AutoPlay" then\n'
-		          + 'play user playlist "AutoPlay"\n'
+            + 'if exists user playlist "' + safepl + '" then\n'
+		          + 'play user playlist "' + safepl + '"\n'
             + 'else\n'
 	            + 'play (some playlist whose special kind is Music)\n'
             + 'end if\n'
@@ -465,58 +479,33 @@ ITunesPlatform.prototype.syncAccessories = function() {
     }.bind(this));
   }
 
-  // Get the id and name of all the AirPlay devices...
-  var tell = 'tell application "iTunes"\n'
-      + 'set apDevMap to {}\n'
-      + 'repeat with aDevice in (AirPlay devices)\n'
-        //+ "copy {id:aDevice's id, name:aDevice's name, mac:aDevice's network address} to the end of the apDevMap\n"
-        + "copy {aDevice's id, aDevice's name, aDevice's network address, aDevice's selected, aDevice's sound volume} to the end of the apDevMap\n"
-      + 'end repeat\n'
-      + 'get apDevMap\n'
-  + 'end tell\n';
-
-  ITunesPlatform.queueScript(tell, function(err, rtn) {
-    if (err) {
-      this.log(err);
-      this.log("ERROR: Failed getting AirPlay devices--iTunes may still be launching. Trying again in two seconds.");
-      syncAgainIn(2000);
-      return;
-    }
-    if (Array.isArray(rtn)) {
-      for(var i = 0; i < rtn.length; i++)
-        rtn[i] = {
-          id: rtn[i][0],
-          name: rtn[i][1],
-          mac: (rtn[i][2] == "missing value" ? null : rtn[i][2]),
-          selected: rtn[i][3],
-          volume: parseInt(rtn[i][4])
-        };
+  this.getAirPlayDevices(function(err, rtn){
+    if(err){
+      debug("Failed getting devices, try again at next sync interval...", err);
+    } else {
       this.rawDevices = rtn;
-
       // Update id's and values and add any devices we didn't have before...
       var foundMacs = {};
-      for (var i = 0; i < this.rawDevices.length; i++) {
-        var rawDevice = this.rawDevices[i];
-        if(!rawDevice.mac) rawDevice.mac = '00-host-audio';
-        foundMacs[rawDevice.mac] = true;
+      for (var i = 0; i < rtn.length; i++) {
+        var rawDevice = rtn[i];
+        foundMacs[rawDevice.mac] = true; // for catching missing devices below...
 
-        if (this.accessories[rawDevice.mac]) {
-          var accessory = this.accessories[rawDevice.mac];
-
-          accessory.context.rawDevice = rawDevice;
-
-          var volCx = accessory.getService(HomeKitMediaTypes.AudioDeviceService).getCharacteristic(HomeKitMediaTypes.AudioVolume);
-          if(volCx.value != rawDevice.volume)
-            volCx.updateValue(rawDevice.volume);
-
-          var onCx = accessory.getService(Service.Switch).getCharacteristic(Characteristic.On);
-          if(onCx.value != rawDevice.selected)
-            onCx.updateValue(rawDevice.selected);
-
-          if(!accessory.reachable) accessory.updateReachability(true);
+        var accessory = this.accessories[rawDevice.mac];
+        if(!accessory){ // Never seen before?
+          var accessory = this.addAirPlayAccessory(rawDevice);
         } else {
-          this.addAirPlayAccessory(rawDevice);
+          accessory.context.rawDevice = rawDevice;
         }
+
+        var volCx = accessory.getService(HomeKitMediaTypes.AudioDeviceService).getCharacteristic(HomeKitMediaTypes.AudioVolume);
+        if(volCx.value != rawDevice.volume)
+          volCx.updateValue(rawDevice.volume);
+
+        var onCx = accessory.getService(Service.Switch).getCharacteristic(Characteristic.On);
+        if(onCx.value != rawDevice.selected)
+          onCx.updateValue(rawDevice.selected);
+
+        if(!accessory.reachable) accessory.updateReachability(true);
       }
       // Set any devices now missing to unreachable...
       for(var m in this.accessories){
@@ -527,6 +516,38 @@ ITunesPlatform.prototype.syncAccessories = function() {
     }
   }.bind(this));
 
+}
+
+ITunesPlatform.prototype.getAirPlayDevices = function(callback){
+  // Get the id and name of all the AirPlay devices...
+  var tell = 'tell application "iTunes"\n'
+      + 'set apDevMap to {}\n'
+      + 'repeat with aDevice in (AirPlay devices)\n'
+        + "copy {aDevice's id, aDevice's name, aDevice's network address, aDevice's selected, aDevice's sound volume} to the end of the apDevMap\n"
+      + 'end repeat\n'
+      + 'get apDevMap\n'
+  + 'end tell\n';
+
+  ITunesPlatform.queueScript(tell, function(err, rtn) {
+    if (err) {
+      callback(err);
+      return;
+    }
+    if (Array.isArray(rtn)) {
+      for(var i = 0; i < rtn.length; i++){
+        var m = rtn[i][2] == "missing value" ? '00-host-audio' : rtn[i][2];
+        rtn[i] = {
+          id: rtn[i][0],
+          name: rtn[i][1],
+          mac: m,
+          selected: rtn[i][3],
+          volume: parseInt(rtn[i][4]),
+          isRegistered: (this.accessories[m] && this.accessories[m].context.rawDevice.isRegistered) //NOTE: Careful! Potentially circular!
+        };
+      }
+      callback(null, rtn);
+    }
+  }.bind(this));
 }
 
 ITunesPlatform.prototype.syncMediaInformation = function(){
@@ -627,6 +648,10 @@ ITunesPlatform.prototype.writeMediaInformationFiles = function(){
     debug(e);
   }
 
+  if(!this.enableNowPlaying){
+    return; // Early out!
+  }
+
   if(name != ITunesPlatform._lastSeenTrackName){
     osascript.executeFile(path.join(__dirname, 'scripts', 'GetAlbumArtwork.applescript'));
   }
@@ -656,6 +681,7 @@ ITunesPlatform.prototype.addPrimaryAccessory = function(mac){
 
   var newAccessory = new Accessory(name, uuid, 1); // 1 = Accessory.Category.OTHER
   newAccessory.context.iTunesMac = mac;
+  newAccessory.context.modelVersion = accessoryModelVersion;
 
   newAccessory.addService(Service.Switch, "Playing State", "playstate").name = "playstate";
   newAccessory.addService(HomeKitMediaTypes.AudioDeviceService, name);
@@ -675,10 +701,11 @@ ITunesPlatform.prototype.addPrimaryAccessory = function(mac){
 
   this.configureAccessory(newAccessory);
 
-  this.api.registerPlatformAccessories("homebridge-itunes", "iTunes", [newAccessory]);
+  //this.api.registerPlatformAccessories("homebridge-itunes", "iTunes", [newAccessory]);
 
   // we came here from an aborted sync, start it again...
-  this.syncAccessories();
+  //this.syncAccessories();
+  return newAccessory;
 }
 
 ITunesPlatform.prototype.addAirPlayAccessory = function(rawDevice) {
@@ -687,6 +714,7 @@ ITunesPlatform.prototype.addAirPlayAccessory = function(rawDevice) {
 
   var newAccessory = new Accessory(rawDevice.name, uuid, 1); // 1 = Accessory.Category.OTHER
   newAccessory.context.rawDevice = rawDevice;
+  newAccessory.context.modelVersion = accessoryModelVersion;
 
   newAccessory.addService(Service.Switch, rawDevice.name);
   newAccessory.addService(HomeKitMediaTypes.AudioDeviceService, rawDevice.name);
@@ -698,14 +726,387 @@ ITunesPlatform.prototype.addAirPlayAccessory = function(rawDevice) {
   .setCharacteristic(Characteristic.SerialNumber, rawDevice.mac);
 
   this.configureAccessory(newAccessory);
+  return newAccessory;
+  //this.api.registerPlatformAccessories("homebridge-itunes", "iTunes", [newAccessory]);
+}
 
+ITunesPlatform.prototype.registerAccessory = function(rawDevice) {
+  var newAccessory;
+  if(rawDevice.iTunesMac){
+    newAccessory = this.primaryAccessory || this.addPrimaryAccessory(rawDevice.iTunesMac);
+    newAccessory.context.isRegistered = true;
+  } else {
+    newAccessory = this.accessories[rawDevice.mac] || this.addAirPlayAccessory(rawDevice);
+    newAccessory.context.rawDevice.isRegistered = true;
+  }
   this.api.registerPlatformAccessories("homebridge-itunes", "iTunes", [newAccessory]);
 }
 
 ITunesPlatform.prototype.removeAccessory = function(accessory) {
   if (accessory) {
-    var mac = accessory.context.rawDevice.mac;
+    if(accessory.context.rawDevice)
+      accessory.context.rawDevice.isRegistered = false;
+    else
+      accessory.context.isRegistered = false;
     this.api.unregisterPlatformAccessories("homebridge-itunes", "iTunes", [accessory]);
-    delete this.accessories[mac];
+  }
+}
+
+ITunesPlatform.prototype.configurationRequestHandler = function(context, request, callback) {
+  if (request && request.type === "Terminate") {
+    return;
+  }
+  debug("called configurationRequestHandler with step " + context.step);
+
+  var platform = this;
+
+  if(!context.newConfig) context.newConfig = this.config;
+
+  // Responses, or other actions that may change the currnet step...
+  if (!context.step) {
+    context.step = "topMenu";
+  } else if(context.step == "topMenuResponse"){
+    var selection = request.response.selections[0];
+    switch(context.options[selection]){
+      case "Preferences":
+        context.step = "preferencesMenu";
+        break;
+      case "Add Devices":
+        context.step = "addDevicesMenu";
+        break;
+      case "Remove Devices":
+        context.step = "removeDevicesMenu";
+        break;
+    }
+  } else if(context.step == "preferencesMenuResponse"){
+    var selection = request.response.selections[0];
+    switch(selection){
+      case 0:
+        context.step = "playlistMenu";
+        break;
+      case 1:
+        context.step = "pollIntervalMenu";
+        break;
+      case 2:
+        context.step = "nowPlayingMenu";
+        break;
+      case 3:
+        context.step = "topMenu";
+        break;
+    }
+  } else if(context.step == "playlistMenuResponse"){
+    var selection = request.response.selections[0];
+    if(selection == context.options.length){
+      context.step = "topMenu";
+    } else {
+      var playlist = context.options[selection];
+      context.newConfig.autoplay_playlist = playlist;
+      this.autoPlayPlaylist = playlist;
+      context.navOptions = [{label: "Back to Preferences", step: "preferencesMenu"}];
+      context.unsaved = true;
+      context.step = "actionSuccess";
+    }
+    delete context.options;
+  } else if(context.step == "pollIntervalMenuResponse"){
+    var selection = request.response.selections[0];
+    context.newConfig.poll_interval = [1000, 2000, 5000, 10000, 30000][selection];
+    this.pollInterval = context.newConfig.poll_interval;
+    context.navOptions = [{label: "Back to Preferences", step: "preferencesMenu"}];
+    context.unsaved = true;
+    context.step = "actionSuccess";
+  } else if(context.step == "nowPlayingMenuResponse"){
+    var selection = request.response.selections[0];
+    context.newConfig.enable_now_playing = [true, false][selection];
+    this.enableNowPlaying = context.newConfig.enable_now_playing;
+    context.navOptions = [{label: "Back to Preferences", step: "preferencesMenu"}];
+    context.unsaved = true;
+    context.step = "actionSuccess";
+  } else if(context.step == "addDevicesMenuResponse"){
+    var selection = request.response.selections[0];
+    if(selection == context.options.length){
+      context.step = "topMenu";
+    } else {
+      var additions = [];
+      if(selection == 0){
+        for(var i = 1; i < context.options.length; i++) additions.push(context.options[i]);
+      } else if(context.options[selection].iTunesMac){
+        additions.push(context.options[selection]);
+      } else {
+        additions.push(context.options[selection]);
+      }
+      for(var i = 0; i < additions.length; i++){
+        this.registerAccessory(additions[i]);
+      }
+      context.navOptions = [{label: "Add more devices", step: "addDevicesMenu"}];
+      context.step = "actionSuccess";
+    }
+    delete context.options;
+  } else if(context.step == "removeDevicesMenuResponse"){
+    var selection = request.response.selections[0];
+    if(selection == context.options.length){
+      context.step = "topMenu";
+    } else {
+      if(selection == 0){
+        for(var i = 1; i < context.options.length; i++) platform.removeAccessory(context.options[i]);
+      } else {
+        platform.removeAccessory(context.options[selection]);
+      }
+      context.navOptions = [{label: "Remove more devices", step: "removeDevicesMenu"}];
+      context.step = "actionSuccess";
+    }
+    delete context.options;
+  } else if(context.step == "actionSuccessResponse"){
+    context.step = [{step: 'topMenu'}].concat(context.navOptions.concat({step: 'finish'}))[request.response.selections[0]].step;
+    delete context.navOptions;
+  }
+
+  if(context.step == "finish"){
+    callback(null, "platform", true, context.newConfig);
+    return;
+  }
+
+  // Menu options and mostly non-interactive steps...
+  switch (context.step) {
+    case "topMenu":
+      var respDict = {
+        "type": "Interface",
+        "interface": "instruction",
+        "title": "Checking Device Status",
+        "detail": "Please wait...",
+        "showNextButton": false
+      }
+      callback(respDict);
+      // That'll hold 'em...
+
+      platform.getAirPlayDevices(function(err, rtn){
+        if(err || !Array.isArray(rtn)){
+          var respDict = {
+            "type": "Interface",
+            "interface": "instruction",
+            "title": "Unexpected Problem",
+            "detail": "There was a problem retrieving the list of available devices. Please try again later.",
+            "showNextButton": true
+          }
+          context.step = "topMenu";
+        } else {
+          var options = [];
+          var paRegistered = this.primaryAccessory && this.primaryAccessory.context.isRegistered;
+          var devsRegistered = rtn.filter(function(rd){return !!rd.isRegistered});
+          var devsUnregistered = rtn.filter(function(rd){return !rd.isRegistered});
+          if(!paRegistered || devsUnregistered.length > 0) options.push("Add Devices");
+          if(paRegistered || devsRegistered.length > 0) options.push("Remove Devices");
+          options.push('Preferences');
+
+          var respDict = {
+            "type": "Interface",
+            "interface": "list",
+            "title": "Configure iTunes Plugin",
+            "items": options
+          }
+          context.options = options;
+          context.step = "topMenuResponse";
+        }
+        callback(respDict);
+      }.bind(this));
+      break;
+    case "preferencesMenu":
+      var respDict = {
+        "type": "Interface",
+        "interface": "list",
+        "title": "Preferences",
+        "items": [
+          "AutoPlay Playlist",
+          "Polling Interval",
+          "Now Playing Feature",
+          "◀ Back"
+        ]
+      }
+      context.step = "preferencesMenuResponse";
+      callback(respDict);
+      break;
+    case "playlistMenu":
+      var respDict = {
+        "type": "Interface",
+        "interface": "instruction",
+        "title": "Retrieving Playlists",
+        "detail": "Please wait...",
+        "showNextButton": false
+      }
+      callback(respDict);
+      // That'll hold 'em...
+
+      var tell = 'tell application "iTunes" \n'
+        + 'set userPlaylists to {} \n'
+        + '	repeat with aPlaylist in (get playlists) \n'
+          + '	copy {the name of aPlaylist} to the end of userPlaylists \n'
+        + 'end repeat \n'
+        + 'get userPlaylists \n'
+      + 'end tell';
+      ITunesPlatform.queueScript(tell, function(err, rtn) {
+        if(err || !Array.isArray(rtn)){
+          var respDict = {
+            "type": "Interface",
+            "interface": "instruction",
+            "title": "Unexpected Problem",
+            "detail": "There was a problem retrieving playlists. Please try again later.",
+            "showNextButton": true
+          }
+          context.step = "topMenu";
+        } else {
+          var options = []; for(var i = 0; i < rtn.length; i++) options.push(rtn[i][0]);
+          var respDict = {
+            "type": "Interface",
+            "interface": "list",
+            "title": "Select AutoPlay Playlist",
+            "items": options.concat(["◀ Back"])
+          }
+          context.options = options;
+          context.step = "playlistMenuResponse";
+        }
+        callback(respDict);
+      }.bind(this));
+      break;
+    case "pollIntervalMenu":
+      var respDict = {
+        "type": "Interface",
+        "interface": "list",
+        "title": "Poll Interval",
+        "detail": "Choose a shorter time for faster updates or a longer time for reduced processor usage. Recommended value is 2 seconds.",
+        "items": [
+          "1 second",
+          "2 seconds",
+          "5 seconds",
+          "10 seconds",
+          "30 seconds"
+        ]
+      }
+      context.step = "pollIntervalMenuResponse";
+      callback(respDict);
+      break;
+    case "nowPlayingMenu":
+      var respDict = {
+        "type": "Interface",
+        "interface": "list",
+        "title": "Now Playing",
+        "detail": "Enable or disable creation of \"Now Playing\" images. Enabling requires ffmpeg with Freetype support and consumes some CPU resources.",
+        "items": [
+          "Enable",
+          "Disable"
+        ]
+      }
+      context.step = "nowPlayingMenuResponse";
+      callback(respDict);
+      break;
+    case "addDevicesMenu":
+      var respDict = {
+        "type": "Interface",
+        "interface": "instruction",
+        "title": "Retrieving Devices",
+        "detail": "Please wait...",
+        "showNextButton": false
+      }
+      callback(respDict);
+      // That'll hold 'em...
+
+      platform.getAirPlayDevices(function(err, rtn){
+        if(err || !Array.isArray(rtn)){
+          var respDict = {
+            "type": "Interface",
+            "interface": "instruction",
+            "title": "Unexpected Problem",
+            "detail": "There was a problem retrieving the list of available devices. Please try again later.",
+            "showNextButton": true
+          }
+          context.step = "topMenu";
+        } else {
+          var optionDevices = [{}];
+          var options = ["Add All"];
+          if(this.primaryAccessory && !this.primaryAccessory.context.isRegistered){
+            options.push("iTunes (playback controls)");
+            optionDevices.push(this.primaryAccessory.context); // NOTE: NOT the same as rawDevice
+          }
+          for(var i = 0; i < rtn.length; i++) if(!rtn[i].isRegistered){
+            options.push(rtn[i].name);
+            optionDevices.push(rtn[i]);
+          }
+          var respDict = {
+            "type": "Interface",
+            "interface": "list",
+            "title": "Select devices to add",
+            "items": options.concat(["◀ Back"])
+          }
+          context.options = optionDevices;
+          context.step = "addDevicesMenuResponse";
+        }
+        callback(respDict);
+      }.bind(this));
+      break;
+    case "removeDevicesMenu":
+      var options = ["Remove All"];
+      var optionAccessories = [{}];
+      if(this.primaryAccessory && this.primaryAccessory.context.isRegistered){
+        options.push("iTunes (playback controls)");
+        optionAccessories.push(this.primaryAccessory);
+      }
+      for(var k in platform.accessories){
+        var a = platform.accessories[k];
+        if(a && a.context && a.context.rawDevice && a.context.rawDevice.isRegistered){
+          options.push(a.context.rawDevice.name);
+          optionAccessories.push(a);
+        }
+      }
+      var respDict = {
+        "type": "Interface",
+        "interface": "list",
+        "title": "Select devices to remove",
+        "items": options.concat(["◀ Back"])
+      }
+      context.options = optionAccessories;
+      context.step = "removeDevicesMenuResponse";
+      callback(respDict);
+      break;
+    case "actionSuccess":
+      var options = ["iTunes Plugin Configuration"];
+      for(var i = 0; i < context.navOptions.length; i++) options.push(context.navOptions[i].label);
+      options.push(context.unsaved ? "Save and Finish" : "Finish");
+      var respDict = {
+        "type": "Interface",
+        "interface": "list",
+        "title": "Success!",
+        "detail": context.unsaved ? "You have unsaved preferences. Choose \"Save and Finish\" before exiting." : '',
+        "items": options
+      }
+      context.step = "actionSuccessResponse";
+      callback(respDict);
+      break;
+    case "finish":
+      var self = this;
+      delete context.step;
+      var newConfig = this.config;
+      var newButtons = Object.keys(this.accessories).map(function(k){
+        var accessory = self.accessories[k];
+        var button = {
+          'name': accessory.displayName,
+          'mac': accessory.context.mac
+        };
+        return button;
+      });
+      newConfig.buttons = newButtons;
+      context.unsaved = false;
+      callback(null, "platform", true, newConfig);
+      break;
+
+    default:
+      var respDict = {
+        "type": "Interface",
+        "interface": "instruction",
+        "title": "Not Implemented",
+        "detail": "This feature is not yet implemented.",
+        "showNextButton": true
+      }
+      context.step = "topMenu";
+      callback(respDict);
+      break;
+
   }
 }
