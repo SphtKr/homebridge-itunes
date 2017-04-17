@@ -100,9 +100,32 @@ ITunesPlatform.escapeAppleScriptString = function(string){
 
 ITunesPlatform.prototype.configureAccessory = function(accessory) {
   if(accessory.context.iTunesMac){
-    this.configurePrimaryAccessory(accessory);
+    if(accessory.context.modelVersion != accessoryModelVersion){
+      // Okay...this can only happen with a *registered* accesory...so it is
+      // safe to unregister and reregister it...
+      setTimeout(function(){
+        // We have to do this *next*, because after configureAccessory, Homebridge
+        // calls addBridgedAccessory...so removing it before it's added doesn't work.
+        this.removeAccessory(accessory);
+        this.registerAccessory({ iTunesMac: accessory.context.iTunesMac });
+      }.bind(this), 0);
+    } else {
+      this.configurePrimaryAccessory(accessory);
+    }
   } else {
-    this.configureAirPlayAccessory(accessory);
+    if(accessory.context.modelVersion != 2){
+      // See note above...
+      // This one gets harder because we need to get the most current version of
+      // the rawDevice, can't rely on what's already in the accessory context!
+      this.getAirPlayDevices(function(err, rtn){
+        // This async function should solve the problem with sequence above...
+        var newrd = rtn.filter(function(rd){ return rd.mac == accessory.context.rawDevice.mac; })[0];
+        this.removeAccessory(accessory);
+        if(newrd) this.registerAccessory(newrd);
+      }.bind(this));
+    } else {
+      this.configureAirPlayAccessory(accessory);
+    }
   }
 }
 
