@@ -295,7 +295,9 @@ ITunesPlatform.prototype.configurePrimaryAccessory = function(accessory) {
   accessory
   .getService('Track Skipper')
   .getCharacteristic(Characteristic.On)
-  .on('get', function(callback){ callback('false'); })
+  .on('get', function(callback){
+    callback(false, false);
+  })
   .on('set', function(newVal, callback){
     if(!newVal){ callback(); return; }
     accessory
@@ -318,7 +320,9 @@ ITunesPlatform.prototype.configurePrimaryAccessory = function(accessory) {
   accessory
   .getService('Album Skipper')
   .getCharacteristic(Characteristic.On)
-  .on('get', function(callback){ callback('false'); })
+  .on('get', function(callback){
+    callback(false, false);
+  })
   .on('set', function(newVal, callback){
     if(!newVal){ callback(); return; }
 
