@@ -39,7 +39,7 @@ function ITunesPlatform(log, config, api) {
   var self = this;
 
   self.log = log;
-  self.config = config || { "platform": "iTunes" };
+  self.config = config || {  };
   self.accessories = {};
   self.syncTimer = null;
   self.pollInterval = self.config.poll_interval || 2000;
@@ -481,7 +481,15 @@ ITunesPlatform.prototype.syncAccessories = function() {
       }
     }.bind(this));
     return; // BRB...
-  } else {
+  }
+
+  // ^ go ahead and let this happen because we need the primaryAccessory set
+  // ^ for the config panel to see it as an option to add.
+
+  // Beyond that though, don't waste cycles if the user hasn't configured us.
+  if(!this.config.platform) return;
+
+  if(pa){
     ITunesPlatform.queueScript('tell application "iTunes" to get {player state, sound volume, exists current track}', function(err, rtn){
       if (err) {
         this.log(err);
@@ -865,6 +873,7 @@ ITunesPlatform.prototype.configurationRequestHandler = function(context, request
         this.registerAccessory(additions[i]);
       }
       context.navOptions = [{label: "Add more devices", step: "addDevicesMenu"}];
+      if(!this.config.platform) context.unsaved = true;
       context.step = "actionSuccess";
     }
     delete context.options;
@@ -879,6 +888,7 @@ ITunesPlatform.prototype.configurationRequestHandler = function(context, request
         platform.removeAccessory(context.options[selection]);
       }
       context.navOptions = [{label: "Remove more devices", step: "removeDevicesMenu"}];
+      if(!this.config.platform) context.unsaved = true;
       context.step = "actionSuccess";
     }
     delete context.options;
@@ -888,6 +898,7 @@ ITunesPlatform.prototype.configurationRequestHandler = function(context, request
   }
 
   if(context.step == "finish"){
+    context.newConfig['platform'] = 'iTunes';
     callback(null, "platform", true, context.newConfig);
     return;
   }
