@@ -7,6 +7,8 @@
 
 Mainly, it makes it possible for you control your music system with Siri or via HomeKit scenes. Besides just play and pause, there are some handy features that make this particularly easy to do. It is geared toward audio uses, but will work in most cases to control video as well.
 
+## Caution: This plugin has not been updated in months and it doesn't work with the latest versions of Homebridge and iTunes.
+
 ## Requirements
 
 This plugin requires a Mac running iTunes, and presently requires Homebridge to be running on that Mac. Already running Homebridge on a Raspberry Pi? No problem: remember that you can run more than one instance of Homebridge on a network, just install Node on your iTunes Mac and run Homebridge there, being sure to change the `"username"` field in `config.json` to be unique.
