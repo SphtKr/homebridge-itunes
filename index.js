@@ -39,7 +39,7 @@ function ITunesPlatform(log, config, api) {
   var self = this;
 
   self.log = log;
-  self.config = config || { "platform": "iTunes" };
+  self.config = config || {  };
   self.accessories = {};
   self.syncTimer = null;
   self.pollInterval = self.config.poll_interval || 2000;
@@ -455,15 +455,44 @@ ITunesPlatform.prototype.configureAirPlayAccessory = function(accessory) {
 
 
 ITunesPlatform.prototype.didFinishLaunching = function() {
-  this.syncAccessories();
+
+  var afterDeviceSync = function(){
+    if(this.config.platform && !this.config.configured_by_ui){
+      // User not using Hesperus, lets add all devices by default...
+      if(!this.primaryAccessory.context.isRegistered){
+        this.registerAccessory(this.primaryAccessory.context);
+      }
+      for(var m in this.accessories){
+        if(this.accessories[m] && !this.accessories[m].context.rawDevice.isRegistered){
+          this.registerAccessory(this.accessories[m]);
+        }
+      }
+    }
+
+    if(!this.config.platform){
+      // If the config entry has been removed, remove all devices...
+      if(this.primaryAccessory && this.primaryAccessory.context.isRegistered){
+        this.removeAccessory(this.primaryAccessory);
+      }
+      for(var m in this.accessories){
+        if(this.accessories[m] && this.accessories[m].context.rawDevice.isRegistered){
+          this.removeAccessory(this.accessories[m]);
+        }
+      }
+    }
+  }.bind(this);
+
+  this.syncAccessories(afterDeviceSync);
 }
 
-ITunesPlatform.prototype.syncAccessoriesScheduler = function(msec){
+ITunesPlatform.prototype.syncAccessoriesScheduler = function(msec, callback){
   clearTimeout(this.syncTimer);
-  this.syncTimer = setTimeout(this.syncAccessories.bind(this), msec);
+  this.syncTimer = setTimeout(
+    function(){ this.syncAccessories(callback); }.bind(this),
+    msec);
 };
 
-ITunesPlatform.prototype.syncAccessories = function() {
+ITunesPlatform.prototype.syncAccessories = function(callback) {
   var syncAgainIn = this.syncAccessoriesScheduler.bind(this);
   syncAgainIn(this.pollInterval);
 
@@ -475,18 +504,30 @@ ITunesPlatform.prototype.syncAccessories = function() {
         // erm...well this is awkward...Try again in a bit?
         this.log(err);
         this.log("ERROR: Failed creating iTunes main device, trying again in two seconds.");
-        syncAgainIn(2000);
+        syncAgainIn(2000, callback);
       } else {
         this.addPrimaryAccessory(rtn);
+        syncAgainIn(0, callback);
       }
     }.bind(this));
     return; // BRB...
-  } else {
+  }
+
+  // ^ go ahead and let this happen because we need the primaryAccessory set
+  // ^ for the config panel to see it as an option to add.
+
+  // Beyond that though, don't waste cycles if the user hasn't configured us.
+  if(!this.config.platform){
+    if(callback) callback(); // We're "finished" at this point, for what it's worth.
+    return;
+  }
+
+  if(pa){
     ITunesPlatform.queueScript('tell application "iTunes" to get {player state, sound volume, exists current track}', function(err, rtn){
       if (err) {
         this.log(err);
         this.log("ERROR: Failed syncing iTunes main device, trying again in two seconds.");
-        syncAgainIn(2000);
+        syncAgainIn(2000, callback);
         return;
       }
       if (Array.isArray(rtn)) {
@@ -508,7 +549,9 @@ ITunesPlatform.prototype.syncAccessories = function() {
 
   this.getAirPlayDevices(function(err, rtn){
     if(err){
-      debug("Failed getting devices, try again at next sync interval...", err);
+      debug("Failed getting devices, try again in two seconds...", err);
+      syncAgainIn(2000, callback);
+      return;
     } else {
       this.rawDevices = rtn;
       // Update id's and values and add any devices we didn't have before...
@@ -540,6 +583,8 @@ ITunesPlatform.prototype.syncAccessories = function() {
           this.accessories[m].updateReachability(false);
       }
 
+      // Finally, completed whole task, execute callback...
+      if(callback) callback();
     }
   }.bind(this));
 
@@ -757,7 +802,13 @@ ITunesPlatform.prototype.addAirPlayAccessory = function(rawDevice) {
   //this.api.registerPlatformAccessories("homebridge-itunes", "iTunes", [newAccessory]);
 }
 
-ITunesPlatform.prototype.registerAccessory = function(rawDevice) {
+ITunesPlatform.prototype.registerAccessory = function(input) {
+  var rawDevice = input; // assume input is a rawDevice or equivalent...
+  // if input is really a primaryAccessory...
+  if(!input.mac && input.context && input.context.iTunesMac) rawDevice = input.context;
+  // if input is really a addAirPlayAccessory...
+  if(!input.mac && input.context && input.context.rawDevice) rawDevice = input.context.rawDevice;
+
   var newAccessory;
   if(rawDevice.iTunesMac){
     newAccessory = this.primaryAccessory || this.addPrimaryAccessory(rawDevice.iTunesMac);
@@ -865,6 +916,7 @@ ITunesPlatform.prototype.configurationRequestHandler = function(context, request
         this.registerAccessory(additions[i]);
       }
       context.navOptions = [{label: "Add more devices", step: "addDevicesMenu"}];
+      if(!this.config.platform) context.unsaved = true;
       context.step = "actionSuccess";
     }
     delete context.options;
@@ -879,6 +931,7 @@ ITunesPlatform.prototype.configurationRequestHandler = function(context, request
         platform.removeAccessory(context.options[selection]);
       }
       context.navOptions = [{label: "Remove more devices", step: "removeDevicesMenu"}];
+      if(!this.config.platform) context.unsaved = true;
       context.step = "actionSuccess";
     }
     delete context.options;
@@ -888,6 +941,8 @@ ITunesPlatform.prototype.configurationRequestHandler = function(context, request
   }
 
   if(context.step == "finish"){
+    context.newConfig['platform'] = 'iTunes';
+    context.newConfig['configured_by_ui'] = true;
     callback(null, "platform", true, context.newConfig);
     return;
   }
