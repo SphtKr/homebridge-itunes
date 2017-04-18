@@ -21,7 +21,17 @@ Node v4 or greater is required, and Homebridge v0.3 or higher.
 
 1. `sudo npm install -g homebridge`, See the [Homebridge](https://github.com/nfarina/homebridge) project site for more information, and to configure Homebridge
 2. `sudo npm install -g homebridge-itunes`
-3. Edit `~/.homebridge/config.json` and add the following:
+3. Configure the platform...
+
+This can be done using one of two methods:
+
+### Hesperus menu-driven configuration
+
+Using the [Hesperus](https://itunes.apple.com/us/app/hesperus/id969348892?mt=8) app, configure Homebridge by tapping the gear icon in the upper-right, selecting "Accessories", and swiping to the left on the Homebridge device and tapping "Config". From there, you can set various configuration options and either add all iTunes/AirPlay devices or add and remove devices selectively.
+
+### Manually add to `config.json`
+
+Add the following platform definition to `~/.homebridge/config.json`:
 
 ```
 "platforms": [
@@ -31,7 +41,7 @@ Node v4 or greater is required, and Homebridge v0.3 or higher.
 ]
 ```
 
-That's it! Homebridge should show your iTunes application and all your AirPlay destinations as HomeKit accessories
+...and then restart Homebridge. Your iTunes application and all your AirPlay destinations will be added as HomeKit accessories
 
 ## Basic Usage
 
@@ -84,12 +94,18 @@ A new feature is the ability to have a "Now Playing" video feed that looks like 
 
 Then, add the camera device to HomeKit (all camera devices have to be added individually, they can't be attached to a bridge device). This is an experimental feature so please provide feedback!
 
+## Uninstall
+
+With the latest Homebridge API, devices are added persistently, meaning that uninstalling the `homebridge-itunes` module will not remove the devices from Homebridge. To remove the devices from HomeKit, either use the configuration mechanism in [Hesperus](https://itunes.apple.com/us/app/hesperus/id969348892?mt=8) described above, or manually remove the iTunes platform from your `config.json` file and restart Homebridge. After this, you can uninstall the module if you like (but it won't really do anything at this point).
+
 ## Known issues
-
-### Unable to remove/uninstall fully
-
-The latest Homebridge API requires the plugin to implement removal of individual devices on a bridge platform, and this has not been implemented yet... This should be coming soon, as it is causing folks problems.
 
 ### CPU Usage High
 
-There may be high CPU usage in some applications. As near as I can tell so far, this is a result of launching the `osascript` executable each time the plugin polls iTunes for its status. Since this is the only way I have to access iTunes and the `osascript` integration is provided in an upstream module, there is a limit to what I can do. I plan to introduce a configuration setting that will let you increase the polling interval (current default 2 seconds) if this is a problem for you. Suggestions welcome!
+It is believed that most of the high-CPU issues reported were actually due to bugs in the dependent AppleScript parsing modules in previous versions. As of 0.2.0-alpha1, there is only one AppleScript library being used and it is a new updated version which is not believed to have these problems. Be sure to update to 0.2.0-alpha1 or later if you are experiencing these problems.
+
+That said, there may be high CPU usage in some applications. As near as I can tell so far, this is a result of launching the `osascript` executable each time the plugin polls iTunes for its status. Since this is the only way I have to access iTunes and the `osascript` integration is provided in an upstream module, there is a limit to what I can do. At present, if this is a problem for you, your best course would be to use the [Hesperus](https://itunes.apple.com/us/app/hesperus/id969348892?mt=8) app to configure a longer polling interval in the iTunes platform preferences. (You can also do this without Hesperus by adding a `poll_interval` value in the platform in `config.json`, using a milliseconds value such as `5000` for five seconds.) The default is 2 seconds, so try a higher value.
+
+### Crashes on startup
+
+Previous crash-on-startup issues were due to version mismatches after upgrades. This is believed to be resolved as of version 0.2.0-alpha1. Please upgrade to 0.2.0-alpha1 or higher if you are experiencing this problem, and if you have already done so, please file an issue.
