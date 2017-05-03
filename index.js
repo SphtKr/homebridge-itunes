@@ -21,7 +21,7 @@ module.exports = function(homebridge) {
 
   homebridge.registerPlatform("homebridge-itunes", "iTunes", ITunesPlatform, true);
 
-  Characteristic.prototype.updateValue = function(newValue, context){
+  Characteristic.prototype.hbitunes_updateValue = function(newValue, context){
     if (newValue === undefined || newValue === null)
       newValue = this.getDefaultValue();
 
@@ -534,11 +534,11 @@ ITunesPlatform.prototype.syncAccessories = function(callback) {
         pa
         .getService(HomeKitMediaTypes.PlaybackDeviceService)
         .getCharacteristic(HomeKitMediaTypes.PlaybackState)
-        .updateValue(pa.getPlaybackStateFromString(rtn[0]));
+        .hbitunes_updateValue(pa.getPlaybackStateFromString(rtn[0]));
         pa
         .getService(HomeKitMediaTypes.AudioDeviceService)
         .getCharacteristic(HomeKitMediaTypes.AudioVolume)
-        .updateValue(parseInt(rtn[1]));
+        .hbitunes_updateValue(parseInt(rtn[1]));
 
         if(rtn[2]){
           this.syncMediaInformation();
@@ -569,11 +569,11 @@ ITunesPlatform.prototype.syncAccessories = function(callback) {
 
         var volCx = accessory.getService(HomeKitMediaTypes.AudioDeviceService).getCharacteristic(HomeKitMediaTypes.AudioVolume);
         if(volCx.value != rawDevice.volume)
-          volCx.updateValue(rawDevice.volume);
+          volCx.hbitunes_updateValue(rawDevice.volume);
 
         var onCx = accessory.getService(Service.Switch).getCharacteristic(Characteristic.On);
         if(onCx.value != rawDevice.selected)
-          onCx.updateValue(rawDevice.selected);
+          onCx.hbitunes_updateValue(rawDevice.selected);
 
         if(!accessory.reachable) accessory.updateReachability(true);
       }
@@ -647,44 +647,44 @@ ITunesPlatform.prototype.syncMediaInformation = function(){
       pa
       .getService(HomeKitMediaTypes.PlaybackDeviceService)
       .getCharacteristic(HomeKitMediaTypes.MediaItemName)
-      .updateValue(rtn[1]);
+      .hbitunes_updateValue(rtn[1]);
       pa
       .getService(HomeKitMediaTypes.PlaybackDeviceService)
       .getCharacteristic(HomeKitMediaTypes.MediaItemAlbumName)
-      .updateValue(rtn[2]);
+      .hbitunes_updateValue(rtn[2]);
       pa
       .getService(HomeKitMediaTypes.PlaybackDeviceService)
       .getCharacteristic(HomeKitMediaTypes.MediaItemArtist)
-      .updateValue(rtn[3]);
+      .hbitunes_updateValue(rtn[3]);
       pa
       .getService(HomeKitMediaTypes.PlaybackDeviceService)
       .getCharacteristic(HomeKitMediaTypes.MediaItemDuration)
-      .updateValue(rtn[4]);
+      .hbitunes_updateValue(rtn[4]);
       pa
       .getService(HomeKitMediaTypes.PlaybackDeviceService)
       .getCharacteristic(HomeKitMediaTypes.MediaCurrentPosition)
-      .updateValue(rtn[5]);
+      .hbitunes_updateValue(rtn[5]);
     } else {
       pa
       .getService(HomeKitMediaTypes.PlaybackDeviceService)
       .getCharacteristic(HomeKitMediaTypes.MediaItemName)
-      .updateValue("");
+      .hbitunes_updateValue("");
       pa
       .getService(HomeKitMediaTypes.PlaybackDeviceService)
       .getCharacteristic(HomeKitMediaTypes.MediaItemAlbumName)
-      .updateValue("");
+      .hbitunes_updateValue("");
       pa
       .getService(HomeKitMediaTypes.PlaybackDeviceService)
       .getCharacteristic(HomeKitMediaTypes.MediaItemArtist)
-      .updateValue("");
+      .hbitunes_updateValue("");
       pa
       .getService(HomeKitMediaTypes.PlaybackDeviceService)
       .getCharacteristic(HomeKitMediaTypes.MediaItemDuration)
-      .updateValue(0);
+      .hbitunes_updateValue(0);
       pa
       .getService(HomeKitMediaTypes.PlaybackDeviceService)
       .getCharacteristic(HomeKitMediaTypes.MediaCurrentPosition)
-      .updateValue(0);
+      .hbitunes_updateValue(0);
     }
     this.writeMediaInformationFiles();
   }.bind(this));
